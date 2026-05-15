@@ -4,6 +4,14 @@
 
 CanHav Research helps web3 and AI agent developers cut through noise — research, infra, and a marketplace to monetize what you build. This monorepo houses the new CanHav site and the foundation for the upcoming on-chain AI agent marketplace on Arbitrum.
 
+## For AI agents / future contributors
+
+Persistent context lives in [`docs/`](./docs):
+
+- [`docs/AI_CONTEXT.md`](./docs/AI_CONTEXT.md) — read this first. Project purpose, stack, conventions.
+- [`docs/DECISIONS.md`](./docs/DECISIONS.md) — locked-in architectural decisions. Don't re-litigate without approval.
+- [`docs/CHANGELOG_DEV.md`](./docs/CHANGELOG_DEV.md) — append-only log of what changed and why. **Update this after every meaningful change.**
+
 ## Monorepo layout
 
 ```
