@@ -26,15 +26,26 @@ canhav-agentmarketplace/
 
 This project is built milestone-by-milestone. Each milestone has explicit exit criteria and we don't move on until it is met.
 
-| # | Milestone | Status | Exit criteria |
-|---|-----------|--------|---------------|
-| 0 | Repo bootstrap | ✅ | Repo + monorepo skeleton created |
-| 1 | Backend + Instantly waitlist | ✅ | `POST /api/waitlist` pushes leads into Instantly.ai |
-| 2 | Frontend shell + cyber/dark design system | ✅ | Next.js shell with nav, footer, three skeleton routes |
-| 3 | Landing page | ✅ | Hero, value props, feature blocks, roadmap, waitlist form, FAQ |
-| 4 | Three tabs | ✅ | Research (external), Market Map, Agents — all working |
-| 5 | Deploy to Vercel + Render | ⏳ | Public URL live, end-to-end waitlist works in production |
-| 6 | On-chain marketplace (Arbitrum) | 🔜 | Solidity contracts + wallet connect + listings |
+| #   | Milestone                                  | Status        | Exit criteria                                                                          |
+| --- | ------------------------------------------ | ------------- | -------------------------------------------------------------------------------------- |
+| 0   | Repo bootstrap                             | ✅            | Repo + monorepo skeleton created                                                       |
+| 1   | Backend + Instantly waitlist               | ✅            | `POST /api/waitlist` pushes leads into Instantly.ai                                    |
+| 2   | Frontend shell + cyber/dark design system  | ✅            | Next.js shell with nav, footer, three skeleton routes                                  |
+| 3   | Landing page                               | ✅            | Hero, value props, feature blocks, roadmap, waitlist form, FAQ                         |
+| 4   | Three tabs                                 | ✅            | Research (external), Market Map, Agents — all working                                  |
+| 5   | Deploy to Vercel + Render                  | ✅            | Public URL live, end-to-end waitlist creates real Instantly leads                      |
+| 6   | Brand (logo, favicon, OG) + E2E verified   | ⏳            | Custom logo/favicon/OG image shipped, 3 production source-tagged leads in Instantly    |
+| 7   | Analytics + privacy                        | 🔜            | Page views, waitlist conversions, outbound clicks tracked (PostHog or similar)         |
+| 8   | Market Map (Supabase)                      | 🔜            | Sectors + projects schema live, Market Map page reads real data                        |
+| 9   | Auth + roles + Substack paid sync          | 🔜            | Supabase Auth, user profiles, paid-subscriber sync from Substack, admin dashboard      |
+| 10  | Agents pillar + skill files                | 🔜            | Agent profile pages, submit-an-agent form, skill `.md` schema defined                  |
+| 11  | On-chain marketplace (Arbitrum Sepolia)    | 🔜            | Foundry contracts (`AgentRegistry`, `Listing`, `Escrow`), wagmi/RainbowKit, indexer    |
+
+### Live URLs
+
+- **Frontend (Vercel):** [`canhav-agentmarketplace.vercel.app`](https://canhav-agentmarketplace.vercel.app)
+- **Backend (Render):** [`canhav-backend.onrender.com`](https://canhav-backend.onrender.com) — health: [`/api/health`](https://canhav-backend.onrender.com/api/health)
+- **Custom domain:** `canhav.com` (planned — already whitelisted in backend `ALLOWED_ORIGINS`)
 
 ## Quick start
 

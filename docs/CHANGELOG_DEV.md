@@ -16,6 +16,37 @@
 
 ---
 
+## 2026-05-15 12:05 — M6 Step 0 + M6.1: Roadmap rolled forward, production E2E verified
+
+**Why.** M5 was marked "configs ready" but never proven against production Instantly. The user has now finished the Vercel + Render deploy steps, supplied the production `ALLOWED_ORIGINS` value, and confirmed they want to continue from a fresh context. Need to (a) prove the live stack actually creates Instantly leads end-to-end, (b) reflect the new M6 → M11 roadmap in all docs, and (c) capture the live URLs as ground truth for the next agent.
+
+**What changed.**
+- **README.md** — Updated milestone table: M5 ✅ (was ⏳), reframed M6 as "Brand + E2E verified", inserted M7 (analytics), M8 (Supabase Market Map), M9 (auth + Substack paid sync), M10 (Agents pillar + skill files), and renumbered the on-chain marketplace as M11. Added a new "Live URLs" subsection with the Vercel + Render production URLs and a note about the planned `canhav.com` custom domain.
+- **docs/AI_CONTEXT.md** — Updated section 1 (status line: M0–M5 done, M6 in progress, marketplace renumbered M11), section 6 (env vars table now lists the actual production `ALLOWED_ORIGINS` value and `NEXT_PUBLIC_API_BASE_URL`, plus a "Production deploys" note), and section 8 (milestone protocol now points to README for the new M6 → M11 plan and notes that M5 is verified).
+- **docs/DECISIONS.md** — Two new entries: (1) "Roadmap renumbered: Marketplace is now M11, with M6–M10 in between" with full rationale and the rejected alternatives; (2) "M5 production deploy verified end-to-end" recording the actual `/api/health` response, the three live `lead_id`s returned by production submissions, and the ALLOWED_ORIGINS value as deployed.
+
+**Files.**
+- `README.md`
+- `docs/AI_CONTEXT.md`
+- `docs/DECISIONS.md`
+- `docs/CHANGELOG_DEV.md` (this entry)
+
+**Verified.**
+- `curl https://canhav-backend.onrender.com/api/health` → `200 {"ok":true,"service":"canhav-backend","instantly_configured":true}` in 179ms (warm).
+- `curl -XPOST https://canhav-agentmarketplace.vercel.app/api/waitlist` with `source: landing` → `200 {"ok":true,"lead_id":"019e2c62-445e-738a-8382-ec17b5811b58"}`.
+- Same with `source: market-map` → `200 {"ok":true,"lead_id":"019e2c62-e46d-7efa-b8df-074ad1f60b61"}`.
+- Same with `source: agents` → `200 {"ok":true,"lead_id":"019e2c62-e650-760b-8831-6058c219bbcd"}`.
+- All three should appear in the configured Instantly campaign with `custom_variables.source` matching the call. **User must visually confirm in the Instantly UI** that the three `verify-*@canhav.com` rows landed with the right `source` and `role` tags.
+
+**Follow-ups.**
+- M6.2 — wire user-supplied brand assets (logo, mark, favicon, OG image) into `frontend/public/brand/`, `Logo.tsx`, and `layout.tsx` metadata. Blocked on the user dropping the asset files in the workspace.
+- M6.3 — single commit `M6: Custom brand assets + Instantly E2E verified`, push to main, confirm Vercel auto-deploy and that the OG image renders in a Twitter / Slack share preview.
+- Open decision (deferred to M9 kickoff): mechanism for syncing Substack paid subscribers — CSV upload vs Zapier vs Stripe webhook.
+- Open decision (deferred to M7 kickoff): analytics vendor — PostHog (recommended for product analytics + privacy posture) vs Plausible (lightest) vs Vercel Analytics (zero-config) vs GA4.
+- Open decision (deferred to M10 kickoff): exact schema for "skill `.md` files" (frontmatter fields, where they live in the repo, how the marketplace surfaces them).
+
+---
+
 ## 2026-05-15 11:25 — Add persistent agent memory in `docs/`
 
 **Why.** Chat context windows hit ~100% during long sessions and the next agent (or the user re-opening the project later) loses everything. Persisting context inside the repo solves this.

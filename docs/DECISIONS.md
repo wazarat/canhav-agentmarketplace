@@ -134,6 +134,44 @@
 
 ---
 
+## 2026-05-15 — Roadmap renumbered: Marketplace is now M11, with M6–M10 in between
+
+**Context.** The original 7-item roadmap (M0–M6) jumped straight from "deploy" to "on-chain marketplace." After M5 shipped, the user articulated five intermediate milestones that need to land first: brand polish, analytics, Market Map data, auth + Substack paid sync, and the Agents pillar.
+
+**Decision.** Renumber the roadmap to:
+- **M6** — Brand assets (logo, favicon, OG image) + production E2E verification
+- **M7** — Analytics (PostHog, Plausible, Vercel Analytics, or GA4 — pick at kickoff)
+- **M8** — Market Map backed by Supabase (Postgres) — sectors + projects schema, FastAPI routes, sector grid UI
+- **M9** — Auth (Supabase) + roles (user/admin/superadmin) + Substack paid-subscriber sync
+- **M10** — Agents pillar (skill `.md` schema, agent profile pages, submit-an-agent form)
+- **M11** — On-chain marketplace on Arbitrum Sepolia (Foundry contracts + wagmi/RainbowKit + indexer)
+
+**Consequences.**
+- Marketplace is now intentionally further out — the project ships value (research, market map, agents directory, paid auth) before the on-chain piece.
+- Each new milestone has its own gating decision still to make at kickoff (analytics vendor, paid-sync mechanism, skill-file schema).
+- README milestone table and `AI_CONTEXT.md` section 8 must reflect this — both updated 2026-05-15.
+
+**Alternatives considered.**
+- *Keep marketplace as M6, add the rest as M7–M11.* Rejected — would imply we should jump to contracts before having auth/users to actually transact on behalf of, which is the wrong sequencing.
+- *Drop the milestone gating entirely and parallelize.* Rejected — user explicitly chose milestone-gated delivery (see prior entry).
+
+---
+
+## 2026-05-15 — M5 production deploy verified end-to-end (Render + Vercel + Instantly)
+
+**Context.** M5 was marked "configs ready" pending the user actually clicking deploy on both platforms.
+
+**Decision.** M5 is now ✅ **done**. Verified on 2026-05-15:
+- `GET https://canhav-backend.onrender.com/api/health` → `200 {"ok":true,"service":"canhav-backend","instantly_configured":true}`
+- `POST https://canhav-agentmarketplace.vercel.app/api/waitlist` (3 calls, one per source tag: `landing`, `market-map`, `agents`) → all `200` with real Instantly `lead_id`s returned (`019e2c62-445e-...`, `019e2c62-e46d-...`, `019e2c62-e650-...`).
+- ALLOWED_ORIGINS in production: `http://localhost:3000,https://canhav.com,https://www.canhav.com,https://canhav-agentmarketplace-5cxv27582-wazarats-projects.vercel.app,https://canhav-agentmarketplace.vercel.app`.
+
+**Consequences.**
+- The Render free tier cold-starts after ~15min idle. First waitlist submission after a long idle may take 5–10s. Acceptable for a waitlist, will revisit if traffic grows.
+- The custom domain `canhav.com` is whitelisted in CORS but not yet pointed (DNS work pending).
+
+---
+
 <!--
 TEMPLATE for new entries:
 

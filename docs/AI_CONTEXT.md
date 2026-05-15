@@ -16,7 +16,7 @@ The end-state is a three-pillar product:
 2. **Market Map** — searchable map of hundreds of projects across the blockchain ecosystem.
 3. **Agents** — bring-your-own-model agent training stack + an on-chain marketplace where specialized AI agents transact with each other on **Arbitrum**.
 
-Today (M0–M5) the repo ships a polished landing page + waitlist that captures interest in all three pillars. The on-chain marketplace (M6) is intentionally not built yet.
+Today (M0–M5 done, M6 in progress) the repo ships a polished landing page + waitlist live in production at [`canhav-agentmarketplace.vercel.app`](https://canhav-agentmarketplace.vercel.app), backed by [`canhav-backend.onrender.com`](https://canhav-backend.onrender.com), creating real leads in Instantly.ai. The on-chain marketplace is now **M11** — see the milestone table in `README.md` for the full M6 → M11 plan.
 
 ## 2. Architecture (one-liner)
 
@@ -143,9 +143,14 @@ Animations (tailwind.config.ts):
 |-------|------|----------|---------|
 | Render (backend) | `INSTANTLY_API_KEY` | yes | Instantly.ai bearer token |
 | Render (backend) | `INSTANTLY_CAMPAIGN_ID` | yes | Campaign UUID for waitlist leads |
-| Render (backend) | `ALLOWED_ORIGINS` | yes | Comma-separated CORS origins (include the Vercel preview URL) |
+| Render (backend) | `ALLOWED_ORIGINS` | yes | Comma-separated CORS origins. **Production value:** `http://localhost:3000,https://canhav.com,https://www.canhav.com,https://canhav-agentmarketplace-5cxv27582-wazarats-projects.vercel.app,https://canhav-agentmarketplace.vercel.app` |
 | Render (backend) | `ENVIRONMENT` | no | `production` / `development` |
-| Vercel (frontend) | `NEXT_PUBLIC_API_BASE_URL` | yes | Public Render URL (e.g. `https://canhav-backend.onrender.com`) |
+| Vercel (frontend) | `NEXT_PUBLIC_API_BASE_URL` | yes | Public Render URL — **production value:** `https://canhav-backend.onrender.com` |
+
+**Production deploys (M5 verified 2026-05-15):**
+- Frontend: https://canhav-agentmarketplace.vercel.app
+- Backend: https://canhav-backend.onrender.com (`/api/health` → `{"ok":true,"instantly_configured":true}`)
+- Custom domain `canhav.com` is whitelisted in CORS but DNS is not yet pointed.
 
 The frontend's `/api/waitlist/route.ts` reads `NEXT_PUBLIC_API_BASE_URL` (or falls back to `API_BASE_URL` server-side, then `http://localhost:8000` for local).
 
@@ -171,7 +176,7 @@ If the dev server hits `EMFILE: too many open files` on macOS, raise the limit (
 
 ## 8. Milestone protocol
 
-We work milestone-by-milestone. **Do not start a new milestone until the previous one's exit criteria are met.** See `README.md` for the milestone table. Current status as of latest commit: M0–M5 done (M5 = deploy configs ready; user is currently in the Vercel deploy step). M6 (Arbitrum marketplace) is intentionally not started.
+We work milestone-by-milestone. **Do not start a new milestone until the previous one's exit criteria are met.** See `README.md` for the milestone table. Current status: M0–M5 done (M5 deploy verified end-to-end — real Instantly leads created from production Vercel through Render). M6 (brand assets + E2E proof) is in progress. Marketplace was renumbered M11 (see `DECISIONS.md` for the full M6 → M11 expansion).
 
 ## 9. Commit convention
 
