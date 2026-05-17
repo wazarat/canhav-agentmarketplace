@@ -17,7 +17,7 @@ export function Logo({ className }: { className?: string }) {
         <span className="absolute -inset-1 -z-10 rounded-lg bg-electric-500/20 blur-md" />
       </span>
       <span className="font-display text-base font-semibold tracking-tight text-ink-50">
-        CanHav
+        CanHav Research
       </span>
     </span>
   );

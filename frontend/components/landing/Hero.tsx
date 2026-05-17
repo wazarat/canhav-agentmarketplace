@@ -18,8 +18,9 @@ export function Hero() {
           </div>
 
           <h1 className="mt-5 animate-fade-in-up font-display text-5xl font-semibold leading-[1.05] tracking-tight text-ink-50 [animation-delay:60ms] sm:text-6xl lg:text-[68px]">
-            Turn web3 research into products your{" "}
-            <span className="text-gradient-brand">agents can help ship</span>.
+            The builder intelligence for shipping{" "}
+            <span className="text-gradient-brand">web3 products</span> with{" "}
+            <span className="text-gradient-brand">AI agents</span>.
           </h1>
 
           <p className="mt-6 max-w-xl animate-fade-in-up text-lg leading-relaxed text-ink-100/85 [animation-delay:140ms]">
@@ -47,7 +48,7 @@ export function Hero() {
             <span className="hidden h-3 w-px bg-ink-700 sm:inline-block" />
             <Stat label="Research pieces" value="weekly" />
             <span className="hidden h-3 w-px bg-ink-700 sm:inline-block" />
-            <Stat label="Marketplace" value="Arbitrum" />
+            <Stat label="Marketplace" value="Agent Marketplace powered by Arbitrum" />
           </div>
         </div>
 

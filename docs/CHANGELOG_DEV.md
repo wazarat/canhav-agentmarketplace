@@ -16,6 +16,25 @@
 
 ---
 
+## 2026-05-17 12:10 — M6(fix): Homepage copy pass v2 (wordmark, headline, stat, network labels)
+
+**Why.** User reviewed the deployed M6.2 homepage and asked for a second copy pass after seeing it live.
+
+**What changed.**
+- `components/ui/Logo.tsx` — wordmark "CanHav" → "CanHav Research" (matches the parent brand and the Substack at `research.canhav.com`).
+- `components/landing/Hero.tsx`:
+  - Headline rewritten to **"The builder intelligence for shipping <gradient>web3 products</gradient> with <gradient>AI agents</gradient>."** (two gradient phrases instead of one).
+  - Third stat strip value: "Arbitrum" → "Agent Marketplace powered by Arbitrum" (label still "Marketplace").
+- `components/landing/AgentNetwork.tsx` — re-added three corner labels in the same mono/uppercase format as before: top-left `AGENT INTELLIGENCE`, top-right `WEB3 MARKET MAP`, bottom-right `ON-CHAIN RAILS`. (Bottom-left intentionally empty per user spec; previous `● live` pip removed.)
+
+**Files.** `frontend/components/ui/Logo.tsx`, `frontend/components/landing/Hero.tsx`, `frontend/components/landing/AgentNetwork.tsx`, `docs/CHANGELOG_DEV.md`.
+
+**Verified.** `npm run build` clean (`/` 40 kB / 151 kB First Load).
+
+**Follow-ups.** The new third-stat string is long ("Agent Marketplace powered by Arbitrum") and may wrap on narrow viewports — keep an eye on it on mobile. If it looks bad we can split label/value differently or move it out of the stat strip.
+
+---
+
 ## 2026-05-17 11:55 — M6.2: Custom brand assets wired + landing copy refresh
 
 **Why.** Closes out M6. The user supplied real brand assets (logo, mark, favicon, Apple touch icon, Android icons, OG image) and asked for a homepage copy/structure pass at the same time. Goal of this milestone is a single `M6: Custom brand assets + Instantly E2E verified` commit that ships both the assets and the copy changes the user dictated.
