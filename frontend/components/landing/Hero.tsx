@@ -48,7 +48,7 @@ export function Hero() {
             <span className="hidden h-3 w-px bg-ink-700 sm:inline-block" />
             <Stat label="Research pieces" value="weekly" />
             <span className="hidden h-3 w-px bg-ink-700 sm:inline-block" />
-            <Stat label="Marketplace" value="Agent Marketplace powered by Arbitrum" />
+            <Stat label="Marketplace" value="Agentic Economy" />
           </div>
         </div>
 

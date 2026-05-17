@@ -16,6 +16,20 @@
 
 ---
 
+## 2026-05-17 12:15 — M6(fix): Stat copy + reposition network labels
+
+**Why.** Live review tweaks after v2.
+
+**What changed.**
+- `components/landing/Hero.tsx` — third stat value: "Agent Marketplace powered by Arbitrum" → "Agentic Economy".
+- `components/landing/AgentNetwork.tsx` — `ON-CHAIN RAILS` moved bottom-right → bottom-left; restored the `● LIVE` signal pip in bottom-right (signal-400).
+
+**Files.** `frontend/components/landing/Hero.tsx`, `frontend/components/landing/AgentNetwork.tsx`, `docs/CHANGELOG_DEV.md`.
+
+**Verified.** `npm run build` clean.
+
+---
+
 ## 2026-05-17 12:10 — M6(fix): Homepage copy pass v2 (wordmark, headline, stat, network labels)
 
 **Why.** User reviewed the deployed M6.2 homepage and asked for a second copy pass after seeing it live.

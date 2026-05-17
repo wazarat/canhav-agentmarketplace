@@ -126,8 +126,11 @@ export function AgentNetwork() {
       <div className="pointer-events-none absolute right-3 top-3 font-mono text-[10px] uppercase tracking-wider text-ink-300">
         web3 market map
       </div>
-      <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[10px] uppercase tracking-wider text-ink-300">
+      <div className="pointer-events-none absolute bottom-3 left-3 font-mono text-[10px] uppercase tracking-wider text-ink-300">
         on-chain rails
+      </div>
+      <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[10px] uppercase tracking-wider text-signal-400">
+        ● live
       </div>
     </div>
   );
