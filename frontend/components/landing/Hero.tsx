@@ -18,15 +18,14 @@ export function Hero() {
           </div>
 
           <h1 className="mt-5 animate-fade-in-up font-display text-5xl font-semibold leading-[1.05] tracking-tight text-ink-50 [animation-delay:60ms] sm:text-6xl lg:text-[68px]">
-            The fastest path from idea to{" "}
-            <span className="text-gradient-brand">shipped, monetized</span> AI
-            agent.
+            Turn web3 research into products your{" "}
+            <span className="text-gradient-brand">agents can help ship</span>.
           </h1>
 
           <p className="mt-6 max-w-xl animate-fade-in-up text-lg leading-relaxed text-ink-100/85 [animation-delay:140ms]">
-            CanHav helps web3 and AI agent developers cut through noise — curated
-            research, a live market map of the ecosystem, and an upcoming on-chain
-            marketplace to monetize what you build.
+            Use CanHav to research blockchain ecosystems, train smarter agents,
+            and turn AI agent workflows into products that can be deployed and
+            monetized on-chain.
           </p>
 
           <div className="mt-8 flex animate-fade-in-up flex-wrap items-center gap-3 [animation-delay:220ms]">

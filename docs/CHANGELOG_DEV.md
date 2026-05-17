@@ -16,6 +16,50 @@
 
 ---
 
+## 2026-05-17 11:55 — M6.2: Custom brand assets wired + landing copy refresh
+
+**Why.** Closes out M6. The user supplied real brand assets (logo, mark, favicon, Apple touch icon, Android icons, OG image) and asked for a homepage copy/structure pass at the same time. Goal of this milestone is a single `M6: Custom brand assets + Instantly E2E verified` commit that ships both the assets and the copy changes the user dictated.
+
+**What changed.**
+
+Brand assets:
+- Added user-supplied files in `frontend/public/`: `logo.svg`, `mark.svg`, `favicon.png`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `og-image.png`. (Note: favicon is `.png`, not `.ico`.)
+- Removed stray `.DS_Store` from `frontend/public/`.
+- `components/ui/Logo.tsx` — replaced the placeholder gradient "C" tile with `<Image src="/mark.svg" />` (28×28, `priority`). Kept the soft electric blur halo and the "CanHav" wordmark.
+- `app/layout.tsx` — added `metadata.icons` (`favicon.png`, `icon-192`, `icon-512`, `apple-touch-icon`), and added `openGraph.images` + `twitter.images` pointing at `/og-image.png` (1200×630). Description now matches the new sub-headline so OG/Twitter previews and the `<meta name="description">` are consistent.
+
+Copy + structure (homepage review):
+- `components/landing/Hero.tsx` — headline rewritten to **"Turn web3 research into products your <gradient>agents can help ship</gradient>."** Sub rewritten to "Use CanHav to research blockchain ecosystems, train smarter agents, and turn AI agent workflows into products that can be deployed and monetized on-chain."
+- `components/landing/SocialProof.tsx` — kept the "Built by researchers shipping across the ecosystem" eyebrow, removed the chain wordmark strip (ETHEREUM/ARBITRUM/BASE/SOLANA/OPTIMISM/POLYGON) — we don't have real partnerships with any of those L1/L2s yet, so claiming them implicitly is misleading.
+- `components/landing/AgentNetwork.tsx` — removed the three left/top/bottom corner labels (`agent_net::v0`, `arbitrum`, `00 nodes online`). Kept only the bottom-right `● live` status pip.
+- `components/landing/ValueProps.tsx` — third card body: "Arbitrum marketplace" → "Agent Marketplace" (we don't want to over-commit to the chain in homepage copy, and "Agent Marketplace" matches the name we'll use in M11).
+- `lib/utils.ts` — `SITE.tagline` updated to match new headline. `SITE.socials.github` removed; `SITE.socials.linkedin` added (`https://www.linkedin.com/in/wazarat`). `SITE.socials.x` updated to `https://x.com/wazarat` (was `https://x.com/canhav_research`, which doesn't exist).
+- `components/layout/Footer.tsx` — Connect column: GitHub icon swapped for LinkedIn icon (`lucide-react`'s `Linkedin`), now linking to the new `SITE.socials.linkedin`. Twitter icon now goes to the new `SITE.socials.x`.
+
+**Files.**
+- `frontend/public/{logo.svg,mark.svg,favicon.png,icon-192.png,icon-512.png,apple-touch-icon.png,og-image.png}` (new, user-supplied)
+- `frontend/components/ui/Logo.tsx`
+- `frontend/app/layout.tsx`
+- `frontend/components/landing/Hero.tsx`
+- `frontend/components/landing/SocialProof.tsx`
+- `frontend/components/landing/AgentNetwork.tsx`
+- `frontend/components/landing/ValueProps.tsx`
+- `frontend/components/layout/Footer.tsx`
+- `frontend/lib/utils.ts`
+- `docs/CHANGELOG_DEV.md` (this entry)
+
+**Verified.**
+- `npm run build` clean. Routes: `/` (39.9 kB / 151 kB First Load), `/agents`, `/market-map`, `/api/waitlist`. No type or lint errors.
+- `curl https://canhav-backend.onrender.com/api/health` → `200 {"ok":true,"service":"canhav-backend","instantly_configured":true}` — confirms the M6.1 production E2E path is still live before we ship the brand changes.
+- M6.1 already proved real Instantly leads from production for `landing` / `market-map` / `agents` sources (lead IDs in the previous changelog entry).
+
+**Follow-ups.**
+- After this push, visually confirm in a Twitter / Slack / iMessage share preview that `og-image.png` renders at 1200×630 (Twitter caches aggressively — use [cards-dev.twitter.com/validator](https://cards-dev.twitter.com/validator) if needed).
+- M7 kickoff (analytics vendor decision: PostHog vs Plausible vs Vercel Analytics vs GA4) is the next milestone.
+- Consider replacing the current `Logo.tsx` `<Image>` with the larger `logo.svg` (full wordmark) anywhere we want a hero-sized logo — right now we only use the square `mark.svg` in the nav/footer, which is correct.
+
+---
+
 ## 2026-05-15 12:05 — M6 Step 0 + M6.1: Roadmap rolled forward, production E2E verified
 
 **Why.** M5 was marked "configs ready" but never proven against production Instantly. The user has now finished the Vercel + Render deploy steps, supplied the production `ALLOWED_ORIGINS` value, and confirmed they want to continue from a fresh context. Need to (a) prove the live stack actually creates Instantly leads end-to-end, (b) reflect the new M6 → M11 roadmap in all docs, and (c) capture the live URLs as ground truth for the next agent.

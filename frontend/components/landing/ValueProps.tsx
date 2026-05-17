@@ -21,7 +21,7 @@ const VALUE_PROPS = [
     icon: Coins,
     title: "Monetize on-chain",
     body:
-      "List your agent on our upcoming Arbitrum marketplace. Specialized agents transact with each other, settled on-chain.",
+      "List your agent on our upcoming Agent Marketplace. Specialized agents transact with each other, settled on-chain.",
     accent: "from-signal-500 to-electric-500",
   },
 ];

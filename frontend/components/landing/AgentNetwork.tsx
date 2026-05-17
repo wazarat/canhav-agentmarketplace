@@ -119,16 +119,7 @@ export function AgentNetwork() {
         </svg>
       </motion.div>
 
-      {/* corner labels */}
-      <div className="pointer-events-none absolute left-3 top-3 font-mono text-[10px] uppercase tracking-wider text-ink-300">
-        agent_net::v0
-      </div>
-      <div className="pointer-events-none absolute right-3 top-3 font-mono text-[10px] uppercase tracking-wider text-ink-300">
-        arbitrum
-      </div>
-      <div className="pointer-events-none absolute bottom-3 left-3 font-mono text-[10px] uppercase tracking-wider text-ink-300">
-        00 nodes online
-      </div>
+      {/* corner label */}
       <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[10px] uppercase tracking-wider text-signal-400">
         ● live
       </div>

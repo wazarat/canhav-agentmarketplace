@@ -7,11 +7,11 @@ export function cn(...inputs: ClassValue[]) {
 
 export const SITE = {
   name: "CanHav",
-  tagline: "The fastest path from idea to shipped, monetized AI agent.",
+  tagline: "Turn web3 research into products your agents can help ship.",
   url: "https://canhav.com",
   research: "https://research.canhav.com",
   socials: {
-    x: "https://x.com/canhav_research",
-    github: "https://github.com/wazarat/canhav-agentmarketplace",
+    x: "https://x.com/wazarat",
+    linkedin: "https://www.linkedin.com/in/wazarat",
   },
 } as const;

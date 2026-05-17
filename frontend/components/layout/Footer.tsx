@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Github, Twitter } from "lucide-react";
+import { Linkedin, Twitter } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
 import { SITE } from "@/lib/utils";
@@ -86,13 +86,13 @@ export function Footer() {
                 </li>
                 <li>
                   <a
-                    href={SITE.socials.github}
+                    href={SITE.socials.linkedin}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label="GitHub"
+                    aria-label="LinkedIn"
                     className="grid h-9 w-9 place-items-center rounded-full glass text-ink-100 hover:text-white"
                   >
-                    <Github size={16} />
+                    <Linkedin size={16} />
                   </a>
                 </li>
               </ul>
