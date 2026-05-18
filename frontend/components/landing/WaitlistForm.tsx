@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
+import posthog from "posthog-js";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -55,12 +56,42 @@ export function WaitlistForm({
 
     setSubmitting(true);
     try {
-      await submitWaitlist({ email, role, source, company });
+      const result = await submitWaitlist({ email, role, source, company });
       setDone(true);
       toast.success("You're on the list. We'll be in touch soon.");
+
+      // PostHog: identify the lead and capture the conversion event.
+      // Safe to no-op when PH isn't initialised (missing key in local dev).
+      try {
+        if (posthog.__loaded) {
+          posthog.identify(email, {
+            email,
+            role: role ?? "unspecified",
+            waitlist_source: source,
+          });
+          posthog.capture("waitlist_submitted", {
+            source,
+            role: role ?? "unspecified",
+            lead_id: result.lead_id,
+          });
+        }
+      } catch {
+        /* analytics errors must never break the form */
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       toast.error(message);
+      try {
+        if (posthog.__loaded) {
+          posthog.capture("waitlist_submit_failed", {
+            source,
+            role: role ?? "unspecified",
+            message,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
     } finally {
       setSubmitting(false);
     }

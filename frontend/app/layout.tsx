@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { Background } from "@/components/layout/Background";
 import { Footer } from "@/components/layout/Footer";
 import { Nav } from "@/components/layout/Nav";
+import { PostHogProvider } from "@/components/providers/PostHogProvider";
 import { SITE } from "@/lib/utils";
 
 import "./globals.css";
@@ -30,10 +31,12 @@ const mono = JetBrains_Mono({
 const DESCRIPTION =
   "Use CanHav to research blockchain ecosystems, train smarter agents, and turn AI agent workflows into products that can be deployed and monetized on-chain.";
 
+const SHARE_TITLE = `${SITE.name}: ${SITE.tagline}`;
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
   title: {
-    default: `${SITE.name} — ${SITE.tagline}`,
+    default: SHARE_TITLE,
     template: `%s · ${SITE.name}`,
   },
   description: DESCRIPTION,
@@ -57,7 +60,7 @@ export const metadata: Metadata = {
     shortcut: [{ url: "/favicon.png", type: "image/png" }],
   },
   openGraph: {
-    title: `${SITE.name} — ${SITE.tagline}`,
+    title: SHARE_TITLE,
     description: DESCRIPTION,
     url: SITE.url,
     siteName: SITE.name,
@@ -67,13 +70,13 @@ export const metadata: Metadata = {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: `${SITE.name} — ${SITE.tagline}`,
+        alt: SHARE_TITLE,
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: `${SITE.name} — ${SITE.tagline}`,
+    title: SHARE_TITLE,
     description: DESCRIPTION,
     images: ["/og-image.png"],
   },
@@ -93,20 +96,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body className="min-h-screen overflow-x-hidden">
-        <Background />
-        <Nav />
-        <main className="pt-24">{children}</main>
-        <Footer />
-        <Toaster
-          theme="dark"
-          position="top-center"
-          toastOptions={{
-            classNames: {
-              toast:
-                "!bg-ink-900/90 !text-ink-50 !border-ink-700/80 backdrop-blur-md",
-            },
-          }}
-        />
+        <PostHogProvider>
+          <Background />
+          <Nav />
+          <main className="pt-24">{children}</main>
+          <Footer />
+          <Toaster
+            theme="dark"
+            position="top-center"
+            toastOptions={{
+              classNames: {
+                toast:
+                  "!bg-ink-900/90 !text-ink-50 !border-ink-700/80 backdrop-blur-md",
+              },
+            }}
+          />
+        </PostHogProvider>
       </body>
     </html>
   );
