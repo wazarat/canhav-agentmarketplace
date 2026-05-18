@@ -44,6 +44,7 @@ canhav-agentmarketplace/
 │   │   ├── landing/                    # Hero, AgentNetwork, SocialProof, ValueProps, Features,
 │   │   │                               # Roadmap, WaitlistSection, WaitlistForm, FAQ
 │   │   ├── layout/                     # Nav, Footer, Background, ComingSoonShell
+│   │   ├── providers/                  # PostHogProvider (+ PostHogPageView) — App Router analytics
 │   │   └── ui/                         # Button (with asChild), Input, Card, Logo
 │   ├── lib/
 │   │   ├── api.ts                      # submitWaitlist(), WaitlistRole/Source types
@@ -66,8 +67,17 @@ canhav-agentmarketplace/
 │   ├── .env.example
 │   └── README.md
 │
-├── contracts/               # Solidity (M6 — empty placeholder, README only)
+├── contracts/               # Solidity (M11 — empty placeholder, README only)
 │   └── README.md                       # Plans for Foundry + AgentRegistry/Listing/Escrow/Router on Arbitrum Sepolia
+│
+├── supabase/                # M8 — Postgres schema + seed for the Market Map data store
+│   └── migrations/                     # `<timestamp>_<name>.sql` files, applied via Supabase CLI or MCP apply_migration
+│
+├── .cursor/skills/market-map/  # M8 — repo-local Claude Skill: how to extend the Market Map
+│   ├── SKILL.md                        # entry skill (audited: visibility / determinism / composability)
+│   ├── scripts/                        # deterministic CLIs: fetch_sheet, normalize_row, validate_schema, upsert_projects, ingest_subsector, add_sector, add_subsector
+│   ├── schemas/                        # JSON Schemas: universal.json + per-sector + per-subsector + column maps
+│   └── sectors/<slug>/                 # per-sector SKILL.md + subsectors/<slug>.md reference docs
 │
 ├── .github/workflows/ci.yml # Frontend: typecheck + lint + build. Backend: import smoke test.
 ├── docs/                    # ← you are here. Persistent agent memory.
@@ -91,15 +101,24 @@ canhav-agentmarketplace/
 - **Sonner** for toasts.
 - **lucide-react** for icons.
 - **clsx + tailwind-merge** for className composition (`cn()` in `lib/utils.ts`).
+- **posthog-js** (+ `posthog-js/react`) for product + web analytics. Initialised in `components/providers/PostHogProvider.tsx` (client) and wrapped in `app/layout.tsx`. SDK requests are proxied through Next.js rewrites at `/ingest/*` → `us.i.posthog.com` (configured in `next.config.mjs`) so ad blockers don't drop events. App Router pageviews fire from `components/providers/PostHogPageView.tsx` (`capture_pageview` is off on init).
 - Fonts: **Inter** (sans), **Space Grotesk** (display), **JetBrains Mono** (mono) — all via `next/font/google`.
 
 ### Backend
 
 - **FastAPI 0.115.5** + **uvicorn[standard]** on Python 3.11.
-- **httpx 0.28** (async) for outbound calls to Instantly.
+- **httpx 0.28** (async) for outbound calls to Instantly **and** to Supabase PostgREST.
 - **pydantic[email] 2.10** for validation.
-- One endpoint that matters: `POST /api/waitlist`.
+- **jsonschema 4.23** for the M8 ingest-pipeline validator at `.cursor/skills/market-map/scripts/validate_schema.py`.
+- Endpoints that matter: `POST /api/waitlist`, and the M8 read-only `/api/market-map/*` family (sectors, subsectors, projects).
 - Deployed on **Render** (free plan), not on Vercel. See DECISIONS.md.
+
+### Market Map data store (M8)
+
+- **Supabase Postgres** with three core tables — `sectors`, `subsectors`, `projects` — and two convenience views (`sector_summary`, `subsector_summary`).
+- 3-tier project schema: typed universal columns + `sector_attributes jsonb` + `subsector_attributes jsonb`. JSONB shapes are documented in `sectors.common_field_schema` and `subsectors.specific_field_schema` (JSON Schema). See DECISIONS.md entry **M8 Market Map: sector-by-sector rollout with 3-tier JSONB schema**.
+- RLS: anon role has SELECT only. All writes happen via the service-role key, exclusively from the ingest scripts under `.cursor/skills/market-map/scripts/` — never from the live web request path.
+- Source data: 7 public Google Sheets (one workbook per sector). Pulled via the `gviz/tq?tqx=out:csv` endpoint — no Sheets API creds required.
 
 ### Email capture
 
@@ -137,6 +156,8 @@ Animations (tailwind.config.ts):
 
 **Rule**: above-the-fold content must be visible without JS. Use Tailwind keyframe animations (`animate-fade-in-up`), NOT framer-motion `initial={{ opacity: 0 }}`, for hero copy.
 
+**Copy rule (2026-05-17)**: avoid em dashes (`—`) in user-facing copy. Use a colon, period, or parenthetical instead. The shared-link `<title>` in `app/layout.tsx` uses `:` (e.g. `CanHav: Turn web3 research into products…`). When you edit a landing component, replace any em dashes you find with a colon, comma, or period if it doesn't change meaning. Documentation and code comments may still use them.
+
 ## 6. Environment variables
 
 | Where | Name | Required | Purpose |
@@ -144,8 +165,13 @@ Animations (tailwind.config.ts):
 | Render (backend) | `INSTANTLY_API_KEY` | yes | Instantly.ai bearer token |
 | Render (backend) | `INSTANTLY_CAMPAIGN_ID` | yes | Campaign UUID for waitlist leads |
 | Render (backend) | `ALLOWED_ORIGINS` | yes | Comma-separated CORS origins. **Production value:** `http://localhost:3000,https://canhav.com,https://www.canhav.com,https://canhav-agentmarketplace-5cxv27582-wazarats-projects.vercel.app,https://canhav-agentmarketplace.vercel.app` |
+| Render (backend) | `SUPABASE_URL` | yes (M8+) | Supabase project URL (`https://<ref>.supabase.co`). If unset, `/api/market-map/*` returns 503. |
+| Render (backend) | `SUPABASE_ANON_KEY` | yes (M8+) | Anon (publishable) key. Used by FastAPI for read-only PostgREST calls. |
+| Render (backend) | `SUPABASE_SERVICE_ROLE_KEY` | optional | Service-role key. Required only if you run the ingest scripts from the Render shell. Local dev usually keeps this in `backend/.env` only. NEVER ship to the frontend. |
 | Render (backend) | `ENVIRONMENT` | no | `production` / `development` |
 | Vercel (frontend) | `NEXT_PUBLIC_API_BASE_URL` | yes | Public Render URL — **production value:** `https://canhav-backend.onrender.com` |
+| Vercel (frontend) | `NEXT_PUBLIC_POSTHOG_KEY` | yes (prod) | PostHog project token (`phc_...`). If missing, the provider logs a warning and no-ops. |
+| Vercel (frontend) | `NEXT_PUBLIC_POSTHOG_HOST` | yes (prod) | UI host for in-app links. Use `https://us.posthog.com` (US Cloud) or `https://eu.posthog.com`. Event ingestion goes through the `/ingest` rewrite to `us.i.posthog.com` regardless. |
 
 **Production deploys (M5 verified 2026-05-15):**
 - Frontend: https://canhav-agentmarketplace.vercel.app
@@ -176,7 +202,17 @@ If the dev server hits `EMFILE: too many open files` on macOS, raise the limit (
 
 ## 8. Milestone protocol
 
-We work milestone-by-milestone. **Do not start a new milestone until the previous one's exit criteria are met.** See `README.md` for the milestone table. Current status: M0–M5 done (M5 deploy verified end-to-end — real Instantly leads created from production Vercel through Render). M6 (brand assets + E2E proof) is in progress. Marketplace was renumbered M11 (see `DECISIONS.md` for the full M6 → M11 expansion).
+We work milestone-by-milestone. **Do not start a new milestone until the previous one's exit criteria are met.** See `README.md` for the milestone table. Current status: M0–M7 done. M8 (Market Map, Supabase-backed) is decomposed into M8.1–M8.11 — see the active plan under `.cursor/plans/m8_market_map_*.plan.md` and the [`docs/DECISIONS.md`](./DECISIONS.md) entry **M8 Market Map: sector-by-sector rollout with 3-tier JSONB schema** for the rationale. Marketplace remains M11.
+
+### How to add a Market Map sector or subsector (M8+)
+
+The full guide lives in [.cursor/skills/market-map/SKILL.md](../.cursor/skills/market-map/SKILL.md). Quick reference:
+
+1. Scaffold skill stubs locally: `python .cursor/skills/market-map/scripts/add_subsector.py --sector <sector-slug> --slug <new-slug> --name "Display Name" --sheet-id <id> --gid <gid>`.
+2. Add the row to a new `supabase/migrations/<timestamp>_<name>.sql`. Apply via Supabase CLI or the Supabase MCP `apply_migration`.
+3. Edit `.cursor/skills/market-map/schemas/subsectors/<slug>.json` + `.column_map.json` to declare the subsector's field shape.
+4. Dry-run ingest: `python .cursor/skills/market-map/scripts/ingest_subsector.py --slug <slug> --dry-run`.
+5. Drop `--dry-run` to commit to Supabase. The script is idempotent — re-running won't duplicate rows.
 
 ## 9. Commit convention
 

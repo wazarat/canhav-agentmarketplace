@@ -25,3 +25,4 @@ class HealthResponse(BaseModel):
     ok: bool
     service: str = "canhav-backend"
     instantly_configured: bool
+    supabase_configured: bool = False

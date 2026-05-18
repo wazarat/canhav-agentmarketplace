@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://canhav.com/schemas/market-map/subsectors/institutional-custody-security.json",
+  "title": "Institutional Custody & Security — subsector_attributes",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {}
+}

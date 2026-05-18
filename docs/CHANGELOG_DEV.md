@@ -16,6 +16,128 @@
 
 ---
 
+## 2026-05-18 18:45 — M8.1-M8.4: Market Map foundations (schema, API, UI shell, skill folder)
+
+**Why.** Kickoff of M8 (Market Map). User chose a sector-by-sector rollout instead of the original "seed 500+" approach, with a repo-local Claude Skill that codifies the workflow so each new sector is mostly data work. The 7 source sectors have heterogeneous fields, so we adopted a 3-tier schema: typed universal columns on `projects` + `sector_attributes jsonb` + `subsector_attributes jsonb`, with JSON Schemas describing each blob's shape.
+
+**What changed.**
+
+Supabase migrations (new):
+- `supabase/migrations/20260518_0001_market_map_schema.sql` — `sectors`, `subsectors`, `projects` tables. Universal columns (`slug`, `name`, `description`, `status`, `stage`, `founded_year`, `total_funding_usd`, etc.) + the two JSONB attribute columns. GIN indexes on `sector_attributes` / `subsector_attributes` for JSONB-key filters. `pg_trgm` index on `projects.name` for ILIKE search. Auto-`updated_at` triggers. RLS enabled, anon-role select-only. Two convenience views: `sector_summary` and `subsector_summary`.
+- `supabase/migrations/20260518_0002_seed_sectors_subsectors.sql` — seeds all 7 sectors and all 36 subsectors with `display_order`, descriptions, and the source-sheet `id`/`gid` for every subsector. Idempotent (`on conflict do update`).
+- **Not yet applied** — Supabase MCP `create_project` is rate-limited by a Vercel-Marketplace-managed 2-project quota; user is provisioning `canhav-market-map` manually in the dashboard. Migrations will be applied via Supabase MCP `apply_migration` once the project is `ACTIVE_HEALTHY`.
+
+Backend (FastAPI):
+- `backend/app/services/supabase.py` (new) — thin async client around Supabase PostgREST. `is_configured()` health gate, `get()` / `get_single()` helpers, custom `SupabaseError`.
+- `backend/app/routes/market_map.py` (new) — read-only API at `/api/market-map/*`: `GET /sectors`, `GET /sectors/{slug}`, `GET /subsectors/{slug}`, `GET /subsectors/{slug}/projects`, `GET /projects` (with `sector` / `subsector` / `search` / `stage` / `status` filters), `GET /projects/{slug}`. Returns the project's `sector` + `subsector` + their schemas alongside the row so the UI can label JSONB keys.
+- `backend/app/main.py` — wires `market_map_router`, splits `is_configured` imports into `instantly_configured` + `supabase_configured`, threads both into `/api/health`.
+- `backend/app/schemas.py` — `HealthResponse.supabase_configured` field added (defaults to False so existing health checks don't break).
+- `backend/.env.example` — added `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` with comments about which key each layer uses.
+- `backend/requirements.txt` — added `jsonschema==4.23.0` (used by the M8 ingest validator).
+
+Frontend (Next.js App Router):
+- `frontend/lib/market-map.ts` (new) — typed server-side client for `/api/market-map/*`. Exports `listSectors`, `getSector`, `getSubsector`, `listSubsectorProjects`, `getProject`, plus `ProjectStatus` / `ProjectStage` union types and the full row interfaces. Server-side `revalidate: 60`. Custom `MarketMapError` so 404s can be distinguished from upstream failures.
+- `frontend/components/market-map/SectorGrid.tsx`, `SubsectorGrid.tsx`, `ProjectTable.tsx`, `Breadcrumbs.tsx`, `ErrorPanel.tsx` (all new) — sector/subsector tiles, project table with formatted funding, breadcrumbs, and a warming-up banner when Supabase is not yet configured.
+- `frontend/app/market-map/page.tsx` — REPLACED the `ComingSoonShell` usage with a live sector grid + stats strip + graceful error panel when the API is unreachable. Server component, fetches at request time with 60s revalidate.
+- `frontend/app/market-map/[sector]/page.tsx` (new) — sector detail (subsector grid + crumbs + counts).
+- `frontend/app/market-map/[sector]/[subsector]/page.tsx` (new) — subsector detail with `ProjectTable`.
+- `frontend/app/market-map/project/[slug]/page.tsx` (new) — project detail. Universal-field overview + sector_attributes section (labels driven by the sector's `common_field_schema`) + subsector_attributes section (labels driven by the subsector's `specific_field_schema`).
+- `frontend/.env.local.example` — documented the optional `API_BASE_URL` SSR override.
+
+Repo-local Claude Skill (`.cursor/skills/market-map/`):
+- `SKILL.md` — entry skill. Audited against the user-supplied "Audit my Claude Skills" framework: (1) Visibility — side-effecting tools have `disable-model-invocation: true`, background-knowledge skills have `user-invocable: false`. (2) Deterministic vs non-deterministic — `fetch_sheet`, `normalize_row`, `validate_schema`, `upsert_projects`, `add_sector`, `add_subsector` are pure scripts; AI is reserved for field-classification judgment. (3) Composability — every script lives in `scripts/` once and is reused across sectors; sector SKILL.md files reference universal fields by link rather than restating them.
+- `scripts/_common.py`, `fetch_sheet.py`, `normalize_row.py`, `validate_schema.py`, `upsert_projects.py`, `ingest_subsector.py`, `add_sector.py`, `add_subsector.py` — full deterministic ingest pipeline. `normalize_row.py` strips whitespace from CSV headers before column-map lookup (handles the L3 sheet's wrapped headers — see below). `ingest_subsector.py` is the one-command end-to-end loop for adding projects to a subsector.
+- `schemas/universal.json` — JSON Schema for the typed universal columns. 36 per-subsector schemas + 36 per-subsector column-map stubs + 7 per-sector schemas + 7 per-sector column-map stubs all scaffolded.
+- 7 `sectors/<slug>/SKILL.md` reference files + 36 `sectors/<slug>/subsectors/<slug>.md` reference files — all `user-invocable: false`, auto-loaded when working in this surface.
+- `sectors/rollup-scaling-frameworks/subsectors/l3-appchain-frameworks.md` — written long-form because of the source-sheet anomalies (see below).
+
+L3 & Appchain Frameworks sheet investigation (the user's flagged source):
+- Pulled the sheet via gviz CSV. 38 columns, 7 entity rows. Found three issues: (1) almost every column header from index 9 onwards has a trailing `\n` because the cell wraps; (2) the sheet explicitly notes overlap with Optimistic Rollups (`"OP Stack (already used, but also belongs here contextually)"`); (3) very low row count.
+- Patched `normalize_row.py` to strip whitespace from headers before column-map lookup so the column map can use clean keys.
+- Documented all three issues in `sectors/rollup-scaling-frameworks/subsectors/l3-appchain-frameworks.md` and recommended L3 ingest be done **last** within the Rollup sector so sector-common fields are settled first.
+
+Docs:
+- `docs/DECISIONS.md` — new entry **2026-05-18 — M8 Market Map: sector-by-sector rollout with 3-tier JSONB schema**. Documents the 3-tier model, the promotion rule (JSONB key → typed column when 3+ sectors share), and the rejected alternatives (typed per-sector tables, pure EAV, single JSONB blob, big-bang seed).
+- `docs/AI_CONTEXT.md` — added `supabase/` and `.cursor/skills/market-map/` to the repo layout (section 3); added the Market Map data store subsection to section 4 (tech stack); added `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` to the env vars table (section 6); added "How to add a Market Map sector or subsector" quick reference to section 8.
+- `README.md` — bumped M6 + M7 to ✅; replaced the M8 row with the sector-by-sector framing; added the M8.1-M8.11 sub-milestone breakdown; updated the architecture summary to mention `/api/market-map/*` and the ingest scripts.
+- `DEPLOYMENT.md` — added `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` to the Render env table with clear notes on which key each layer uses; updated the smoke-test JSON to include `supabase_configured`; added a "§5 Market Map (M8) — Supabase" section with the 5-step provision flow.
+
+**Files.**
+- `supabase/migrations/20260518_0001_market_map_schema.sql` (new)
+- `supabase/migrations/20260518_0002_seed_sectors_subsectors.sql` (new)
+- `backend/app/services/supabase.py` (new)
+- `backend/app/routes/market_map.py` (new)
+- `backend/app/main.py`, `backend/app/schemas.py`, `backend/.env.example`, `backend/requirements.txt`
+- `frontend/lib/market-map.ts` (new)
+- `frontend/components/market-map/{SectorGrid,SubsectorGrid,ProjectTable,Breadcrumbs,ErrorPanel}.tsx` (new)
+- `frontend/app/market-map/page.tsx`, `frontend/app/market-map/[sector]/page.tsx` (new), `frontend/app/market-map/[sector]/[subsector]/page.tsx` (new), `frontend/app/market-map/project/[slug]/page.tsx` (new)
+- `frontend/.env.local.example`
+- `.cursor/skills/market-map/SKILL.md`, `README.md`, `scripts/*.py` (8 files), `schemas/universal.json` + 7 sector + 36 subsector schema + column-map stubs, `sectors/*/SKILL.md` (7 sectors), `sectors/*/subsectors/*.md` (36 subsectors)
+- `docs/AI_CONTEXT.md`, `docs/DECISIONS.md`, `docs/CHANGELOG_DEV.md` (this entry), `README.md`, `DEPLOYMENT.md`
+
+**Verified.**
+- Backend: `python -c "from app.main import app"` lists 8 API routes incl. the 6 new `/api/market-map/*` endpoints.
+- Frontend: `npm run build` clean. 4 new dynamic routes registered (`/market-map`, `/market-map/[sector]`, `/market-map/[sector]/[subsector]`, `/market-map/project/[slug]`). No TS or lint errors. First Load JS for the new pages is 96.2 kB (same as the shared baseline).
+- Skill scaffold: all 7 sectors + 36 subsectors scaffolded by a one-shot run of `add_sector.write_sector_files` + `add_subsector.write_files` for each pair. Verified the on-disk tree matches the plan structure.
+- L3 sheet: pulled live via gviz, confirmed the wrapped-header issue, patched `normalize_row.py`, documented in the L3 reference doc.
+
+**Follow-ups.**
+- **User action required:** create the `canhav-market-map` Supabase project manually in the dashboard (free tier, `us-east-1`). Vercel Marketplace's 2-project quota blocks MCP `create_project` until then. Once `ACTIVE_HEALTHY`, the next agent (or me on resume) should: apply the two migrations via Supabase MCP `apply_migration`, verify `select count(*) from sectors` returns 7 and `subsectors` returns 36, then set `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` in `backend/.env` and on Render.
+- M8.5 kickoff: pilot sector **Core Protocol Architecture**. Read the 5 source sheets, decide which columns are universal (already typed), which are `sector_attributes` (shared across all 5 subsectors), which are `subsector_attributes`. Edit the sector + 5 subsector JSON schemas + column maps. Run `python .cursor/skills/market-map/scripts/ingest_subsector.py --slug consensus-layer --dry-run` for each subsector, review, then commit. Goal: `/market-map/core-protocol-architecture` renders the 5 subsector tiles with non-zero project counts and at least one fully-populated project detail page in prod.
+- Promote stable JSONB keys: once 3+ sectors share a key, file a migration that adds the typed column + backfills. Likely candidates after M8.5: `client_implementations`, `chain_layer` (L1/L2/L3/L4), `consensus_mechanism`.
+- M8.6 prep: do not start L3 ingest until the other 3 Rollup subsectors are done. See `sectors/rollup-scaling-frameworks/subsectors/l3-appchain-frameworks.md` for the sheet-quality caveats.
+
+---
+
+## 2026-05-17 13:30 — M7: PostHog analytics wired (Product + Web) + em-dash purge in share title
+
+**Why.** Kickoff of M7 (analytics). User chose PostHog after seeing four products pre-selected in the onboarding (Product Analytics, Web Analytics, LLM Analytics, Logs — default: Product Analytics). Same pass also removes the em dash from the shared-link title because em dashes "read LLM-generated" and the user wants to eliminate them from user-facing copy site-wide as we touch each file.
+
+**What changed.**
+
+Em dash → colon (share-link title only; the rest will be migrated opportunistically):
+- `app/layout.tsx` — extracted a `SHARE_TITLE = \`${SITE.name}: ${SITE.tagline}\`` and reused it for `metadata.title.default`, `openGraph.title`, `openGraph.images[0].alt`, and `twitter.title`. Previously each of those used `${SITE.name} — ${SITE.tagline}`. Visible effect: when someone pastes a link to the site in iMessage/Slack/Twitter, the preview now reads `CanHav: Turn web3 research into products your agents can help ship.` instead of `CanHav — Turn web3 research into products…`.
+
+PostHog M7 (Phase 1 — Product + Web Analytics):
+- Installed `posthog-js@^1.373.5` and `posthog-node@^5.34.2` (the node SDK is staged for M10's LLM Analytics; not used at runtime yet).
+- New `components/providers/PostHogProvider.tsx` (client). Initialises `posthog-js` inside `useEffect` with `api_host: "/ingest"`, `ui_host` from env, `capture_pageview: false` (we handle it manually for App Router), `capture_pageleave: true`, `capture_exceptions: true`, `person_profiles: "identified_only"`, `defaults: "2026-01-30"`. Guards against double-init via a module-level flag. If `NEXT_PUBLIC_POSTHOG_KEY` is missing, logs a dev-only warning and no-ops so local dev / preview deploys without the secret still build and run.
+- New `components/providers/PostHogPageView.tsx` (client). Fires `$pageview` on `usePathname()`/`useSearchParams()` change, wrapped in `<Suspense>` so the App Router doesn't deopt every page into client rendering (per Next.js docs).
+- `app/layout.tsx` — wrapped `<Background />`, `<Nav />`, `<main>`, `<Footer />`, and `<Toaster />` in `<PostHogProvider>`. The provider mounts `<PostHogPageView />` for us.
+- `next.config.mjs` — added `rewrites()` to proxy `/ingest/static/:path*` → `us-assets.i.posthog.com/static/:path*` and `/ingest/:path*` → `us.i.posthog.com/:path*`, plus `skipTrailingSlashRedirect: true` (PostHog's API uses trailing slashes). This is the recommended "same-origin reverse proxy" pattern — ad blockers that block `*.posthog.com` can't drop our events, and the cookie/event surface stays first-party.
+- `components/landing/WaitlistForm.tsx` — on successful `submitWaitlist()` we now call `posthog.identify(email, { email, role, waitlist_source })` and `posthog.capture("waitlist_submitted", { source, role, lead_id })`. On failure we capture `waitlist_submit_failed`. Both are wrapped in `try/catch` and gated on `posthog.__loaded` so analytics errors can never break the form.
+- `frontend/.env.local.example` — added `NEXT_PUBLIC_POSTHOG_KEY=` and `NEXT_PUBLIC_POSTHOG_HOST=https://us.posthog.com`.
+- `DEPLOYMENT.md` — added both env vars to the Vercel deploy table and a note explaining the `/ingest` reverse proxy + the "missing key → no-op" behaviour.
+
+Docs:
+- `docs/AI_CONTEXT.md` — added `posthog-js` to the stack list (section 4), added a "Copy rule" line under section 5 banning em dashes in user-facing copy, added `components/providers/` to the repo layout, added `NEXT_PUBLIC_POSTHOG_KEY` + `NEXT_PUBLIC_POSTHOG_HOST` to the env vars table (section 6).
+- `docs/DECISIONS.md` — added two entries: (1) **M7 analytics vendor: PostHog (Product + Web Analytics first)** with the rationale, the explicit phasing (LLM Analytics deferred to M10, Logs deferred until we have something worth logging), and the rejected alternatives (Plausible / Vercel Analytics / GA4 / self-hosted). Includes a note that we're using the provider pattern instead of `instrumentation-client.ts` because we're on Next 14.2.35 (the instrumentation file is 15.3+ only) — when we upgrade we should migrate. (2) **Style: no em dashes in user-facing copy** locking in the copy rule.
+
+**Files.**
+- `frontend/app/layout.tsx`
+- `frontend/components/providers/PostHogProvider.tsx` (new)
+- `frontend/components/providers/PostHogPageView.tsx` (new)
+- `frontend/components/landing/WaitlistForm.tsx`
+- `frontend/next.config.mjs`
+- `frontend/.env.local.example`
+- `frontend/package.json` + `frontend/package-lock.json` (posthog-js, posthog-node added)
+- `DEPLOYMENT.md`
+- `docs/AI_CONTEXT.md`
+- `docs/DECISIONS.md`
+- `docs/CHANGELOG_DEV.md` (this entry)
+
+**Verified.**
+- `npm run build` clean. Routes: `/` (40.1 kB / 213 kB First Load — up from 151 kB; the +62 kB is `posthog-js`), `/agents` (175 kB), `/market-map` (175 kB), `/api/waitlist`. No type or lint errors.
+- `posthog-js` and `posthog-node` correctly added to `frontend/package.json` only (no stray root-level install — a stray root `package.json`/`node_modules`/`package-lock.json` was created on the first install attempt because the shell cwd was the repo root; cleaned up and re-installed in `frontend/`).
+
+**Follow-ups.**
+- User must set `NEXT_PUBLIC_POSTHOG_KEY` (`phc_...` from us.posthog.com → Project settings → Project API Key) and `NEXT_PUBLIC_POSTHOG_HOST=https://us.posthog.com` in Vercel (Production + Preview + Development), then redeploy. Until then the production build runs but no events are sent.
+- After the first prod deploy with the key set, do a live smoke test: open `https://canhav-agentmarketplace.vercel.app` in an incognito window, navigate `/` → `/market-map` → `/agents`, submit the waitlist form on one of them, then confirm in PostHog → Activity that you see `$pageview` × 3 and `waitlist_submitted` × 1, and that the person profile is keyed by the email you submitted.
+- Remaining em-dash sweep: ~10 component files still contain em dashes per ripgrep (`frontend/app/{market-map,agents}/page.tsx`, `frontend/components/landing/{WaitlistForm,Features,FAQ,AgentNetwork,ValueProps}.tsx`, `frontend/components/layout/ComingSoonShell.tsx`, `frontend/lib/api.ts`). Per the copy rule, replace these opportunistically when touching those files for other reasons.
+- Phase 2 (deferred): LLM Analytics + Logs. Wire `posthog-node` LLM tracing into the M10 Agents pillar, set up OTLP log capture when we have a backend log surface worth shipping.
+- When we eventually upgrade to Next.js 15.3+ (no current plan), migrate from the `PostHogProvider` component to `instrumentation-client.ts` per PostHog's current Next.js docs.
+
+---
+
 ## 2026-05-17 12:15 — M6(fix): Stat copy + reposition network labels
 
 **Why.** Live review tweaks after v2.

@@ -1,0 +1,21 @@
+{
+  "_comment_": "Map Google Sheets column headers to (bucket, field) pairs. bucket: universal | sector | subsector.",
+  "Project": {
+    "bucket": "universal",
+    "field": "name"
+  },
+  "Website": {
+    "bucket": "universal",
+    "field": "website_url",
+    "type": "url"
+  },
+  "Twitter": {
+    "bucket": "universal",
+    "field": "twitter_handle",
+    "type": "twitter"
+  },
+  "Description": {
+    "bucket": "universal",
+    "field": "description"
+  }
+}

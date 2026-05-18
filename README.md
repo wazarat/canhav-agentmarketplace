@@ -34,12 +34,30 @@ This project is built milestone-by-milestone. Each milestone has explicit exit c
 | 3   | Landing page                               | ✅            | Hero, value props, feature blocks, roadmap, waitlist form, FAQ                         |
 | 4   | Three tabs                                 | ✅            | Research (external), Market Map, Agents — all working                                  |
 | 5   | Deploy to Vercel + Render                  | ✅            | Public URL live, end-to-end waitlist creates real Instantly leads                      |
-| 6   | Brand (logo, favicon, OG) + E2E verified   | ⏳            | Custom logo/favicon/OG image shipped, 3 production source-tagged leads in Instantly    |
-| 7   | Analytics + privacy                        | 🔜            | Page views, waitlist conversions, outbound clicks tracked (PostHog or similar)         |
-| 8   | Market Map (Supabase)                      | 🔜            | Sectors + projects schema live, Market Map page reads real data                        |
+| 6   | Brand (logo, favicon, OG) + E2E verified   | ✅            | Custom logo/favicon/OG image shipped, 3 production source-tagged leads in Instantly    |
+| 7   | Analytics + privacy                        | ✅            | PostHog Product + Web Analytics wired through the `/ingest` proxy                      |
+| 8   | Market Map (Supabase, sector-by-sector)    | ⏳            | All 7 sectors live at `/market-map` with real, sheet-sourced projects in prod          |
 | 9   | Auth + roles + Substack paid sync          | 🔜            | Supabase Auth, user profiles, paid-subscriber sync from Substack, admin dashboard      |
 | 10  | Agents pillar + skill files                | 🔜            | Agent profile pages, submit-an-agent form, skill `.md` schema defined                  |
 | 11  | On-chain marketplace (Arbitrum Sepolia)    | 🔜            | Foundry contracts (`AgentRegistry`, `Listing`, `Escrow`), wagmi/RainbowKit, indexer    |
+
+### M8 sub-milestones (in progress)
+
+M8 is decomposed into 11 sub-milestones so we ship one sector at a time. See the active plan in `.cursor/plans/` and the [`docs/DECISIONS.md`](./docs/DECISIONS.md) entry for the full rationale.
+
+| #     | Sub-milestone                                                | Status |
+| ----- | ------------------------------------------------------------ | ------ |
+| M8.1  | Supabase schema + seed sectors/subsectors                    | ⏳ (migrations written, project provisioning pending) |
+| M8.2  | FastAPI `/api/market-map/*` read-only routes                 | ✅ (live behind `SUPABASE_*` env vars) |
+| M8.3  | `/market-map` UI (sector grid + sector + subsector + project)| ✅ (renders against the API; graceful warming-up state) |
+| M8.4  | `.cursor/skills/market-map/` bootstrap + scripts             | ✅ (entry SKILL.md, 7 sector + 36 subsector stubs, deterministic scripts) |
+| M8.5  | Pilot sector — Core Protocol Architecture                    | 🔜 |
+| M8.6  | Rollup & Scaling Frameworks (L3 sheet flagged for cleanup)   | 🔜 |
+| M8.7  | Monetary & Access Rails                                      | 🔜 |
+| M8.8  | DeFi Systems Architecture                                    | 🔜 |
+| M8.9  | Data & Consensus Infrastructure                              | 🔜 |
+| M8.10 | Advanced Compute & Integration                               | 🔜 |
+| M8.11 | Governance & Enterprise Framework                            | 🔜 |
 
 ### Live URLs
 
@@ -77,9 +95,10 @@ Visitor → Vercel (Next.js) → Render (FastAPI) → Instantly.ai
                           ↘ research.canhav.com (Substack)
 ```
 
-- **Frontend:** Next.js 14, Tailwind, shadcn/ui, Framer Motion. Dark cyber aesthetic.
-- **Backend:** FastAPI + httpx. One endpoint today (`POST /api/waitlist`) that creates an Instantly lead with `source` + `role` custom variables.
-- **Email capture:** Instantly.ai REST API. No DB on day one — Instantly is the source of truth.
+- **Frontend:** Next.js 14, Tailwind, hand-rolled UI primitives, Framer Motion. Dark cyber aesthetic.
+- **Backend:** FastAPI + httpx. `POST /api/waitlist` creates an Instantly lead; `/api/market-map/*` serves the Market Map data over Supabase PostgREST.
+- **Email capture:** Instantly.ai REST API. No DB for the waitlist — Instantly is the source of truth.
+- **Market Map data:** Supabase Postgres. 3-tier schema (universal columns + `sector_attributes jsonb` + `subsector_attributes jsonb`). Ingest is sector-by-sector via the deterministic scripts in [`.cursor/skills/market-map/`](./.cursor/skills/market-map/).
 - **Future on-chain layer:** Solidity contracts on Arbitrum Sepolia testnet, wallet connect via wagmi/RainbowKit.
 
 ## Deployment

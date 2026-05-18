@@ -7,9 +7,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routes.market_map import router as market_map_router
 from app.routes.waitlist import router as waitlist_router
 from app.schemas import HealthResponse
-from app.services.instantly import is_configured
+from app.services.instantly import is_configured as instantly_configured
+from app.services.supabase import is_configured as supabase_configured
 
 load_dotenv()
 
@@ -39,6 +41,7 @@ app.add_middleware(
 )
 
 app.include_router(waitlist_router)
+app.include_router(market_map_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -48,4 +51,8 @@ async def root() -> dict[str, str]:
 
 @app.get("/api/health", response_model=HealthResponse, tags=["meta"])
 async def health() -> HealthResponse:
-    return HealthResponse(ok=True, instantly_configured=is_configured())
+    return HealthResponse(
+        ok=True,
+        instantly_configured=instantly_configured(),
+        supabase_configured=supabase_configured(),
+    )

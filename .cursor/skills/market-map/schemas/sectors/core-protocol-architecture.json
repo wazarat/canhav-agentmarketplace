@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://canhav.com/schemas/market-map/sectors/core-protocol-architecture.json",
+  "title": "Core Protocol Architecture — sector_attributes",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {}
+}

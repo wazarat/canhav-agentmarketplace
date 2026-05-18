@@ -3,3 +3,6 @@ uvicorn[standard]==0.32.1
 httpx==0.28.1
 pydantic[email]==2.10.3
 python-dotenv==1.0.1
+# Used by .cursor/skills/market-map/scripts/validate_schema.py (M8 ingest pipeline). Pinned
+# alongside the backend so the same venv can run both the API and the ingest scripts.
+jsonschema==4.23.0

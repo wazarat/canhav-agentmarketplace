@@ -157,6 +157,79 @@
 
 ---
 
+## 2026-05-17 — M7 analytics vendor: PostHog (Product + Web Analytics first)
+
+**Context.** M7 opens with the deferred analytics-vendor decision (PostHog vs Plausible vs Vercel Analytics vs GA4). User opened a PostHog onboarding and pre-selected four products: **Product Analytics, Web Analytics, LLM Analytics, Logs** (default: Product Analytics). PostHog is also the recommended pick in the M6 follow-ups in `CHANGELOG_DEV.md`.
+
+**Decision.** Adopt **PostHog Cloud (US)** as the single analytics vendor.
+- Phase 1 (this milestone): Product Analytics + Web Analytics via `posthog-js`. Autocapture on; manual `$pageview` from the App Router; person profiles set to `identified_only` (avoid an anonymous profile per session); waitlist signups identified with the email as `distinct_id` and a `waitlist_submitted` event captured.
+- Phase 2 (when the relevant features land): LLM Analytics via `posthog-node` once the agents pillar makes its first LLM calls (M10); Logs via OTLP exporter once we have something worth logging server-side.
+
+**Consequences.**
+- One vendor, one project, one billing line item across product / web / replay / errors / LLM / logs / flags / experiments — explicitly the "grouping products in one project" pattern PostHog recommends.
+- All ingestion goes through a same-origin reverse proxy at `/ingest/*` (configured in `next.config.mjs` via `rewrites()` → `us.i.posthog.com` + `us-assets.i.posthog.com`). Two upsides: ad blockers that block `*.posthog.com` won't drop events; the cookie/event surface stays first-party. Cost: every event request traverses Vercel's edge, which is fine on our traffic.
+- The provider is initialised inside a client `useEffect` (we're on Next.js 14.2.35, which does **not** support `instrumentation-client.ts` — that's 15.3+). When we upgrade to Next 15.3+ we should migrate to `instrumentation-client.ts` and delete the provider component (the example reference notes the two approaches must not be combined).
+- If `NEXT_PUBLIC_POSTHOG_KEY` is missing the provider logs a warning and no-ops, so local dev and preview deploys without the secret still build and run.
+- Identifying by email is a deliberate trade-off (vs an opaque UUID): we already store the email in Instantly, so PostHog isn't adding new PII surface, and it makes cross-tool linking trivial.
+
+**Alternatives considered.**
+- *Plausible.* Lightest, privacy-friendliest, but no funnels / cohorts / experiments / replay / LLM analytics. We'd outgrow it the moment M9 (auth) lands.
+- *Vercel Analytics + Vercel Web Analytics.* Zero config, but the data is read-only inside Vercel — no cohorting, no event capture, no flags, no replay. Useful as a free supplement later if we want Core Web Vitals.
+- *GA4.* Universally hated DX, terrible event model, sampling. No.
+- *Self-hosted PostHog.* Not worth the ops cost at this stage.
+
+**When to revisit.** When PostHog Cloud bills exceed ~$50/month, or when we need a metric PostHog explicitly doesn't surface well (e.g. SEO).
+
+---
+
+## 2026-05-17 — Style: no em dashes in user-facing copy
+
+**Context.** Em dashes (`—`) read as LLM-generated to a non-trivial slice of readers and the user wants the marketing copy to feel hand-written. The visible offender today was the shared-link title (`CanHav — Turn web3 research into products…`) in `app/layout.tsx` metadata.
+
+**Decision.** No em dashes in user-facing copy on the site. Use a colon, comma, period, or parenthetical instead. The shared-link `<title>` now uses `:` (e.g. `CanHav: Turn web3 research into products…`). Other em dashes in landing components will be migrated opportunistically as we touch those files (the `AI_CONTEXT.md` "Copy rule" enforces this for future agents). Em dashes are still allowed in `docs/`, code comments, and PR descriptions.
+
+**Consequences.** Slightly stricter copy review surface; agents have one fewer "tell". Costs nothing.
+
+**Alternatives considered.** *Ban en dashes too.* Rejected — en dashes (`–`) are useful for date ranges and don't carry the same LLM-vibe.
+
+---
+
+## 2026-05-18 — M8 Market Map: sector-by-sector rollout with 3-tier JSONB schema
+
+**Context.** The original M8 ("provision Supabase, seed 500+ projects, replace `/market-map` placeholder") had two problems: (1) the "500+" target forces premature data work before the schema has been learned, and (2) there's no system for the next agent to keep extending the dataset. The user also surfaced that the 7 source sectors have heterogeneous fields — every sector has its own sheets with overlapping-but-not-identical columns, and within a sector each subsector has unique columns of its own. A flat one-size-fits-all schema would either lose those fields or churn migrations every sector.
+
+**Decision.** Ship M8 as a chain of sub-milestones (M8.1 → M8.11) that loop sector-by-sector. The data model is three tiers:
+
+- **Universal columns** (typed Postgres columns on `projects`): the fields every project has regardless of sector — `slug`, `name`, `description`, `website_url`, `status`, `stage`, `founded_year`, `total_funding_usd`, etc.
+- **`sector_attributes jsonb`** on `projects`: fields shared by every subsector within a sector. Shape documented in `sectors.common_field_schema` (JSON Schema).
+- **`subsector_attributes jsonb`** on `projects`: fields specific to one subsector. Shape documented in `subsectors.specific_field_schema`.
+
+Promotion rule: once a JSONB key appears in **3+ sectors**, promote it to a typed column via a follow-up migration. Not before.
+
+A repo-local Claude Skill at [.cursor/skills/market-map/](.cursor/skills/market-map/) codifies the workflow:
+- Entry [`SKILL.md`](.cursor/skills/market-map/SKILL.md) (audited against the user-supplied "Audit my Claude Skills" framework: visibility, deterministic vs non-deterministic, composability).
+- Deterministic shared scripts in `scripts/` (`fetch_sheet`, `normalize_row`, `validate_schema`, `upsert_projects`, `ingest_subsector`, `add_sector`, `add_subsector`) — zero token cost, idempotent, side effects gated behind `--dry-run`.
+- Per-sector + per-subsector reference docs (`user-invocable: false`) auto-load when working on this surface but don't clutter `/menu`.
+
+Source data lives in 7 public Google Sheets (one workbook per sector, one tab per subsector). Ingest pulls via the public `gviz/tq?tqx=out:csv` endpoint — no Sheets API creds, no manual CSV exports.
+
+**Consequences.**
+- Adding a new project to an existing subsector is a one-command operation: `python .cursor/skills/market-map/scripts/ingest_subsector.py --slug <subsector>`.
+- Adding a brand-new subsector is two commands + one migration: `add_subsector.py` scaffolds the skill stub + JSON schema + column map; an SQL migration inserts the row.
+- JSONB makes schema iteration painless during the early sectors, at the cost of giving up some Postgres type-checking until we promote. Indexed via `gin (sector_attributes)` + `gin (subsector_attributes)` so JSONB-key filters stay fast.
+- Each sector loop ends with a deploy. The "500+ projects" copy on the homepage becomes truthful sector-by-sector — we delete the placeholder claim until real numbers back it up.
+- Frontend reads via FastAPI only (`/api/market-map/*`), never directly from Supabase in the browser. Keeps the anon key off the wire and centralizes caching.
+
+**Alternatives considered.**
+- *Typed per-sector child tables (`core_protocol_projects`, `defi_projects`, ...).* Strictest type-safety but migration churn every sector and an N-way join every cross-sector query. Rejected.
+- *Pure EAV (entity-attribute-value).* Maximum flexibility, terrible query ergonomics, no integrity. Rejected.
+- *One JSONB blob (no sector/subsector split).* Loses the structural information the UI needs to render fields with proper labels per sector. Rejected.
+- *Seed all 500+ projects in one go up front.* Original plan. Rejected per the kickoff conversation — premature data work and no learning loop.
+
+**When to revisit.** When 3+ JSONB keys have stabilized across sectors → promote to typed columns. When the dataset exceeds ~5k projects, consider materialized views for the sector/subsector summary counts (currently plain `view`s).
+
+---
+
 ## 2026-05-15 — M5 production deploy verified end-to-end (Render + Vercel + Instantly)
 
 **Context.** M5 was marked "configs ready" pending the user actually clicking deploy on both platforms.
