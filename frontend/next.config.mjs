@@ -5,6 +5,18 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ["lucide-react", "framer-motion"],
   },
+  // Project logos live in the Supabase Storage public bucket. ProjectLogo uses
+  // `unoptimized` so we don't actually hit the Next image optimizer, but listing
+  // the host here keeps the door open for future srcset / responsive variants.
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "*.supabase.co",
+        pathname: "/storage/v1/object/public/**",
+      },
+    ],
+  },
   // PostHog ingestion reverse proxy: the SDK posts to `/ingest/*` and we forward
   // to PostHog's US Cloud so ad blockers don't drop requests to *.posthog.com.
   // See https://posthog.com/docs/advanced/proxy/nextjs

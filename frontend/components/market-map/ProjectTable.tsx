@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, ShieldCheck } from "lucide-react";
 
+import { ProjectLogo } from "@/components/market-map/ProjectLogo";
 import type { ProjectRow } from "@/lib/market-map";
 
 interface ProjectTableProps {
@@ -146,20 +147,27 @@ export function ProjectTable({ projects, sectorSlug, subsectorSlug, emptyHint }:
                   <td className="px-4 py-3 align-top">
                     <Link
                       href={`/market-map/project/${p.slug}`}
-                      className="group inline-flex items-center gap-2 font-medium text-ink-50 hover:text-electric-400"
+                      className="group flex items-start gap-3"
                     >
-                      {isCanonical && (
-                        <ShieldCheck
-                          className="h-3.5 w-3.5 text-amber-300"
-                          aria-label="Canonical specification"
-                        />
-                      )}
-                      {p.name}
-                      <ArrowUpRight className="h-3.5 w-3.5 opacity-0 transition group-hover:opacity-100" />
+                      <ProjectLogo project={p} size="sm" />
+                      <div className="min-w-0 flex-1">
+                        <div className="inline-flex items-center gap-1.5 font-medium text-ink-50 group-hover:text-electric-400">
+                          {isCanonical && (
+                            <ShieldCheck
+                              className="h-3.5 w-3.5 text-amber-300"
+                              aria-label="Canonical specification"
+                            />
+                          )}
+                          {p.name}
+                          <ArrowUpRight className="h-3.5 w-3.5 opacity-0 transition group-hover:opacity-100" />
+                        </div>
+                        {p.description && (
+                          <p className="mt-1 line-clamp-1 text-[12px] text-ink-300">
+                            {p.description}
+                          </p>
+                        )}
+                      </div>
                     </Link>
-                    {p.description && (
-                      <p className="mt-1 line-clamp-1 text-[12px] text-ink-300">{p.description}</p>
-                    )}
                   </td>
                   {cols.org && (
                     <td className="px-4 py-3 align-top text-ink-100">

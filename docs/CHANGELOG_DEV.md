@@ -16,6 +16,67 @@
 
 ---
 
+## 2026-05-19 16:00 — M8.5: project logos pipeline + 6 Consensus Layer logos live
+
+**Why.** Subsector tables and detail pages looked anonymous without organization marks. Needed a deterministic logo pipeline now (so it scales to ~500 entities) and 6 logos uploaded for the Consensus Layer to validate the design. Logos must look uniform regardless of source (light bg, dark bg, JPEG with white fill, transparent PNG, square or wide) and must never overpower the rest of the page.
+
+**What changed.**
+
+Storage + DB:
+- `supabase/migrations/20260519_0002_project_logos_storage_bucket.sql` (new) — creates the public Supabase Storage bucket `project-logos`, RLS policies (anon SELECT, service_role INSERT/UPDATE/DELETE only). Applied on `jyokdforojvzhxelffnx`.
+- `projects.logo_url` column already existed (no schema change). All 6 Consensus Layer rows now point at `https://jyokdforojvzhxelffnx.supabase.co/storage/v1/object/public/project-logos/<org-slug>.webp`.
+
+Ingest scripts:
+- `.cursor/skills/market-map/scripts/upload_logo.py` (new) — single-project uploader. Opens with Pillow, resize-fits to 256×256 transparent canvas (Lanczos), encodes WebP q=85 method=6 (typical output 1.5–6 KB), POSTs to Storage with `x-upsert: true` and `Cache-Control: public, max-age=31536000, immutable`, then PATCHes `projects.logo_url`.
+- `.cursor/skills/market-map/scripts/bulk_upload_logos.py` (new) — folder scan: matches each `<File Name>.{png,jpg,jpeg,webp,gif}` to projects by slugifying the file stem and comparing to every project's `sector_attributes.maintaining_organization`. `--subsector` flag for scoped runs, `--dry-run` to preview. One file per org → all projects under that org share it.
+- `.cursor/skills/market-map/LOGOS.md` (new) — full best-practices doc: TL;DR, naming convention, source format preference order (SVG > PNG/WebP > JPEG), what the optimizer does, UI treatment rules, sector-loop integration. Linked from the main SKILL.md.
+- `backend/requirements.txt` — added `Pillow==11.3.0` so the ingest scripts run from the backend venv.
+
+Frontend:
+- `frontend/components/market-map/ProjectLogo.tsx` (new) — single source of truth for logo rendering. Three sizes (sm 28px, md 48px, lg 80px), always inside a rounded `bg-ink-800/70` tile with `border-ink-700/60`, `object-contain` (never crop or distort), ~10% padding inside the tile. Falls back to a 2-letter monogram when `logo_url` is null, so layout doesn't shift when logos arrive late. `unoptimized` prop on next/image — sources are already 256×256 WebPs, no need for Vercel's optimizer.
+- `frontend/next.config.mjs` — added `images.remotePatterns` for `*.supabase.co/storage/v1/object/public/**` (future-proofing for srcset; `unoptimized` means we don't actually use the optimizer today).
+- `frontend/components/market-map/ProjectTable.tsx` — `<ProjectLogo size="sm" />` now leads every row, with name + description in the same `Link`-wrapped flex group.
+- `frontend/components/market-map/CanonicalSpecCard.tsx` — `<ProjectLogo size="md" />` lives next to the gradient title in the spec hero.
+- `frontend/app/market-map/project/[slug]/page.tsx` — `<ProjectLogo size="lg" />` to the left of the H1; added a "Maintained by …" line below the name.
+
+6 logos uploaded via `python bulk_upload_logos.py --dir ~/logos --subsector consensus-layer`:
+| Project | Org file | Stored as | Optimized size |
+|---|---|---|---|
+| ethereum-consensus-specifications | `Ethereum Foundation.jpeg` (35 KB) | `ethereum-foundation.webp` | 3.7 KB |
+| prysm | `Prysmatic Labs.jpg` (14 KB) | `prysmatic-labs.webp` | 1.8 KB |
+| lighthouse | `Sigma Prime.jpg` (95 KB) | `sigma-prime.webp` | 1.9 KB |
+| teku | `Consensys.jpg` (105 KB) | `consensys.webp` | 3.2 KB |
+| nimbus | `Status.png` (27 KB) | `status.webp` | 2.4 KB |
+| lodestar | `ChainSafe.jpeg` (10 KB) | `chainsafe.webp` | 5.3 KB |
+
+**Files.**
+- `supabase/migrations/20260519_0002_project_logos_storage_bucket.sql`
+- `.cursor/skills/market-map/LOGOS.md`
+- `.cursor/skills/market-map/SKILL.md` (added 2 rows to the script index)
+- `.cursor/skills/market-map/scripts/upload_logo.py`
+- `.cursor/skills/market-map/scripts/bulk_upload_logos.py`
+- `backend/requirements.txt`
+- `frontend/components/market-map/ProjectLogo.tsx`
+- `frontend/components/market-map/ProjectTable.tsx`
+- `frontend/components/market-map/CanonicalSpecCard.tsx`
+- `frontend/app/market-map/project/[slug]/page.tsx`
+- `frontend/next.config.mjs`
+- `docs/CHANGELOG_DEV.md`
+
+**Verified.**
+- `apply_migration` returned `{"success": true}`.
+- `bulk_upload_logos.py --dry-run` mapped all 6 files to all 6 projects, no skips.
+- Live run: 6 uploaded, 6 patched.
+- `curl -I https://jyokdforojvzhxelffnx.supabase.co/storage/v1/object/public/project-logos/sigma-prime.webp` → `HTTP 200`, `content-type: image/webp`, `size 1918`.
+- `select name, logo_url from projects where subsector_slug = 'consensus-layer'` returns full public CDN URLs for all 6 rows.
+- `npm run build` clean. `npm run lint` clean. All Market Map routes still `ƒ (Dynamic)`.
+
+**Follow-ups.**
+- For the next subsector (Execution Layer), drop org logos into `~/logos`, then `python bulk_upload_logos.py --dir ~/logos --subsector execution-layer`. Skips files with no match, so it's safe to run with leftover Consensus files in the folder.
+- Once we hit ~50+ logos, consider adding a Supabase Storage cleanup script (delete objects whose org-slug doesn't appear in `projects.sector_attributes.maintaining_organization` anywhere).
+
+---
+
 ## 2026-05-19 15:10 — M8.5 (partial): Consensus Layer ingested + canonical-spec UI
 
 **Why.** First real subsector of the Market Map. Pilots the sector-by-sector loop on the Consensus Layer (5 Ethereum CL clients + the Ethereum Consensus Specifications). The spec is normative — every client below it conforms to it — so the UI needed an authoritative "canonical" treatment, not just another row in a table.

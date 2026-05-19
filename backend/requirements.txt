@@ -6,3 +6,6 @@ python-dotenv==1.0.1
 # Used by .cursor/skills/market-map/scripts/validate_schema.py (M8 ingest pipeline). Pinned
 # alongside the backend so the same venv can run both the API and the ingest scripts.
 jsonschema==4.23.0
+# Used by .cursor/skills/market-map/scripts/upload_logo.py to resize + WebP-encode
+# project logos before uploading to the Supabase Storage `project-logos` bucket.
+Pillow==11.3.0

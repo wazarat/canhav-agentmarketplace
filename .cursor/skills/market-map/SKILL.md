@@ -36,6 +36,8 @@ When a JSONB key has stabilized across **3 or more sectors**, promote it to a ty
 | Validate a row against the sector / subsector JSON schemas           | [`scripts/validate_schema.py`](scripts/validate_schema.py) |
 | Push validated rows into Supabase                                    | [`scripts/upsert_projects.py`](scripts/upsert_projects.py) |
 | Run the full ingest loop for one subsector                           | [`scripts/ingest_subsector.py`](scripts/ingest_subsector.py) |
+| Upload one project logo                                              | [`scripts/upload_logo.py`](scripts/upload_logo.py) — see [LOGOS.md](LOGOS.md) |
+| Upload a whole folder of org logos                                   | [`scripts/bulk_upload_logos.py`](scripts/bulk_upload_logos.py) — see [LOGOS.md](LOGOS.md) |
 
 All scripts read config from environment variables. Required:
 
