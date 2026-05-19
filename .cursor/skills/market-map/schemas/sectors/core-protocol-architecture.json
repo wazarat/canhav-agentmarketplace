@@ -2,7 +2,67 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://canhav.com/schemas/market-map/sectors/core-protocol-architecture.json",
   "title": "Core Protocol Architecture — sector_attributes",
+  "description": "Fields shared by every subsector in Core Protocol Architecture (Consensus Layer, Execution Layer, Validators & Staking Providers, MEV & Block Builders, Network Upgrades).",
   "type": "object",
   "additionalProperties": true,
-  "properties": {}
+  "properties": {
+    "maintaining_organization": {
+      "title": "Maintaining organization",
+      "type": "string",
+      "description": "The org or team that owns / maintains the entity (e.g. 'Ethereum Foundation', 'Sigma Prime', 'Prysmatic Labs')."
+    },
+    "entity_type": {
+      "title": "Entity type",
+      "type": "string",
+      "description": "What kind of thing this is. 'Protocol Specification (Normative)' is reserved for canonical, spec-level entries.",
+      "examples": [
+        "Protocol Specification (Normative)",
+        "Consensus Client",
+        "Execution Client",
+        "Validator Operator",
+        "Staking Provider",
+        "Block Builder",
+        "Relay",
+        "Network Upgrade"
+      ]
+    },
+    "supported_networks": {
+      "title": "Supported networks",
+      "type": "string",
+      "description": "Semicolon-separated list of chains / networks this entity supports."
+    },
+    "license": {
+      "title": "License",
+      "type": "string",
+      "description": "SPDX-like identifier for the entity's source license (e.g. 'apache-2.0', 'mit', 'gpl-3.0-or-later', 'cc-by-4.0', 'proprietary')."
+    },
+    "production_status": {
+      "title": "Production status",
+      "type": "string",
+      "description": "Maturity / deployment status. 'canonical' is reserved for authoritative specs.",
+      "examples": [
+        "canonical",
+        "production-major",
+        "production-stable",
+        "production-limited",
+        "experimental",
+        "deprecated"
+      ]
+    },
+    "reason_for_inclusion": {
+      "title": "Reason for inclusion",
+      "type": "string",
+      "description": "Why this entity belongs in the Market Map. Multi-line markdown-ish text from the source sheet."
+    },
+    "practitioner_note": {
+      "title": "Practitioner note",
+      "type": "string",
+      "description": "Editorial commentary from the CanHav research team."
+    },
+    "practitioner_validation_check": {
+      "title": "Practitioner validation check",
+      "type": "string",
+      "description": "Counter-factual / what-if-this-disappeared check, used to justify inclusion."
+    }
+  }
 }

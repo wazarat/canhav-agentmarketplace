@@ -16,6 +16,50 @@
 
 ---
 
+## 2026-05-19 15:10 — M8.5 (partial): Consensus Layer ingested + canonical-spec UI
+
+**Why.** First real subsector of the Market Map. Pilots the sector-by-sector loop on the Consensus Layer (5 Ethereum CL clients + the Ethereum Consensus Specifications). The spec is normative — every client below it conforms to it — so the UI needed an authoritative "canonical" treatment, not just another row in a table.
+
+**What changed.**
+
+Data + schemas:
+- `supabase/migrations/20260519_0001_consensus_layer_schemas.sql` (new) — points `subsectors.consensus-layer` at the new source sheet `1DQB35o6r52b-6sazjzdtdXViC5I6IVbh` / gid `1429524989`, installs the Core Protocol Architecture `common_field_schema` on the sector row, and the Consensus Layer `specific_field_schema` on the subsector row. Both schemas use `additionalProperties: true` so per-row shape can evolve mid-loop without re-migrating.
+- `.cursor/skills/market-map/schemas/sectors/core-protocol-architecture.json` (new) — sector-wide fields: `maintaining_organization`, `entity_type`, `supported_networks`, `license`, `production_status`, `reason_for_inclusion`, `practitioner_note`, `practitioner_validation_check`.
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.json` (new) — subsector-specific fields: `client_implementation`, `role_in_consensus`, `client_category`, `client_scope`, `implementation_language`, `client_diversity_risk`, `client_diversity_risk_note`.
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.column_map.json` (new) — maps every sheet header to `{bucket, field, type}` so `normalize_row.py` produces correctly bucketed rows. `Client Repo → universal.github_url`, `Entity Type → sector.entity_type`, `Role in Consensus → subsector.role_in_consensus`, etc.
+- Ingested 6 rows live via `python ingest_subsector.py --slug consensus-layer` (Ethereum Consensus Specifications + Prysm + Lighthouse + Teku + Nimbus + Lodestar). `TBD`-only sheet cells coerce to `null` in DB (clean) and render as `—` in the UI.
+
+Frontend:
+- `frontend/components/market-map/CanonicalSpecCard.tsx` (new) — hero card for the canonical entity. Conic-gradient ring, amber "Canonical Specification" badge, two-column "Role in consensus" / "Why it's canonical" bullet lists, meta strip (category, scope, supported networks), and a "Documentation"/"consensus-specs" link strip. Used on the subsector page above the implementations table.
+- `frontend/components/market-map/ProjectTable.tsx` — rebuilt. Now schema-aware: dynamically chooses columns from `{ Maintained by, Language, Production, Diversity, Stage, Funding, Links }` based on which fields any row in the visible set actually has (so the table never shows all-empty columns). Production-status and diversity pills with color tiers (canonical → amber, production-major → electric, etc.). Canonical rows get a faint amber tint and a shield icon.
+- `frontend/app/market-map/[sector]/[subsector]/page.tsx` — partitions projects into `canonical` vs `others`. Canonical specs render as `CanonicalSpecCard`s above an "Implementations" table whose subtitle reads "All implementations conform to the canonical spec above". Header chips now break out canonical-spec count vs client count.
+- `frontend/app/market-map/project/[slug]/page.tsx` — canonical badge above the title + amber-gradient title for the spec entity; sections themed amber when viewing a canonical entity. Multi-value fields (`supported_networks`, `role_in_consensus`, `reason_for_inclusion`, `practitioner_validation_check`) render as bullet lists; long prose fields use `whitespace-pre-line`. `FieldRow` gained `alignTop` so list/prose fields align top-of-cell.
+
+**Files.**
+- `supabase/migrations/20260519_0001_consensus_layer_schemas.sql`
+- `.cursor/skills/market-map/schemas/sectors/core-protocol-architecture.json`
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.json`
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.column_map.json`
+- `frontend/components/market-map/CanonicalSpecCard.tsx`
+- `frontend/components/market-map/ProjectTable.tsx`
+- `frontend/app/market-map/[sector]/[subsector]/page.tsx`
+- `frontend/app/market-map/project/[slug]/page.tsx`
+- `docs/CHANGELOG_DEV.md`
+
+**Verified.**
+- `apply_migration` on Supabase project `jyokdforojvzhxelffnx` → `{"success": true}`.
+- `python ingest_subsector.py --slug consensus-layer` → `Validated 6 rows: 6 pass, 0 fail. Upserted 6 rows.` Idempotent on rerun (PostgREST `on_conflict=slug`, `Prefer: resolution=merge-duplicates`).
+- `GET /api/market-map/subsectors/consensus-layer/projects` returns 6 rows with correct `sector_attributes.entity_type`, `production_status`, and `subsector_attributes.implementation_language`.
+- `GET /api/market-map/subsectors/consensus-layer` returns both schemas with proper titles, so the project detail page renders `Maintaining organization`, `Role in consensus`, etc. instead of raw keys.
+- `npm run build` clean. `npm run lint` clean.
+
+**Follow-ups.**
+- 4 more Core Protocol Architecture subsectors to ingest (Execution Layer, Validators & Staking Providers, MEV & Block Builders, Network Upgrades) before M8.5 closes.
+- The remaining typed universal fields (status, stage, founded_year, total_funding_usd, last_funding_round, last_funding_date, twitter_handle, logo_url, hq_country, team_size_range) are all `TBD` in the source sheet — to be filled in a later research pass.
+- Consider promoting `entity_type` from `sector_attributes` to a typed `entity_type text` column on `projects` once we've ingested 2-3 more sectors and the value set is stable. (Per the promotion rule in `docs/DECISIONS.md`.)
+
+---
+
 ## 2026-05-18 18:45 — M8.1-M8.4: Market Map foundations (schema, API, UI shell, skill folder)
 
 **Why.** Kickoff of M8 (Market Map). User chose a sector-by-sector rollout instead of the original "seed 500+" approach, with a repo-local Claude Skill that codifies the workflow so each new sector is mostly data work. The 7 source sectors have heterogeneous fields, so we adopted a 3-tier schema: typed universal columns on `projects` + `sector_attributes jsonb` + `subsector_attributes jsonb`, with JSON Schemas describing each blob's shape.

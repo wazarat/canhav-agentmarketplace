@@ -1,10 +1,42 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, ShieldCheck } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/market-map/Breadcrumbs";
 import { getProject, MarketMapError, type ProjectDetail } from "@/lib/market-map";
+
+// Fields whose values are semicolon- or newline-separated lists in the source sheet.
+// Rendering them as bullets dramatically improves scannability.
+const LIST_FIELDS = new Set([
+  "supported_networks",
+  "role_in_consensus",
+  "reason_for_inclusion",
+  "practitioner_validation_check",
+]);
+
+// Fields whose values are long-form prose paragraphs. We render them with
+// whitespace-pre-line so author line breaks survive.
+const PROSE_FIELDS = new Set([
+  "practitioner_note",
+  "practitioner_validation_check",
+  "reason_for_inclusion",
+]);
+
+function splitList(value: string): string[] {
+  return value
+    .split(/[;\n]+/)
+    .map((s) => s.trim().replace(/^[-•]\s*/, ""))
+    .filter(Boolean);
+}
+
+function isCanonicalProject(p: ProjectDetail): boolean {
+  const sector = (p.sector_attributes ?? {}) as Record<string, unknown>;
+  const productionStatus =
+    typeof sector.production_status === "string" ? sector.production_status.toLowerCase() : "";
+  const entityType = typeof sector.entity_type === "string" ? sector.entity_type.toLowerCase() : "";
+  return productionStatus === "canonical" || entityType.includes("specification");
+}
 
 interface PageProps {
   params: { slug: string };
@@ -23,13 +55,25 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-function FieldRow({ label, value }: { label: string; value: React.ReactNode }) {
+function FieldRow({
+  label,
+  value,
+  alignTop = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  alignTop?: boolean;
+}) {
   return (
-    <div className="flex flex-col gap-1 border-b border-ink-700/40 py-2.5 last:border-b-0 sm:flex-row sm:items-baseline sm:gap-6">
-      <dt className="font-mono text-[10px] uppercase tracking-wider text-ink-300 sm:w-48 sm:shrink-0">
+    <div
+      className={`flex flex-col gap-1 border-b border-ink-700/40 py-3 last:border-b-0 sm:flex-row sm:gap-6 ${
+        alignTop ? "sm:items-start" : "sm:items-baseline"
+      }`}
+    >
+      <dt className="font-mono text-[10px] uppercase tracking-wider text-ink-300 sm:w-56 sm:shrink-0 sm:pt-0.5">
         {label}
       </dt>
-      <dd className="text-sm text-ink-100">{value}</dd>
+      <dd className="min-w-0 flex-1 text-sm text-ink-100">{value}</dd>
     </div>
   );
 }
@@ -39,13 +83,36 @@ function humanLabel(key: string, schema?: Record<string, unknown> | null): strin
   return props[key]?.title ?? key.replace(/_/g, " ");
 }
 
-function formatValue(value: unknown): React.ReactNode {
+function formatValue(value: unknown, key?: string): React.ReactNode {
   if (value === null || value === undefined || value === "") return <span className="text-ink-300">—</span>;
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "number") return value.toLocaleString();
   if (Array.isArray(value)) return value.join(", ");
   if (typeof value === "object") return <code className="text-xs text-ink-300">{JSON.stringify(value)}</code>;
-  return String(value);
+  const raw = String(value);
+  if (key && LIST_FIELDS.has(key)) {
+    const items = splitList(raw);
+    if (items.length > 1) {
+      return (
+        <ul className="space-y-1.5">
+          {items.map((it, i) => (
+            <li key={i} className="flex gap-2 text-ink-100">
+              <span className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-electric-500/70" />
+              <span>{it}</span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+  }
+  if (key && PROSE_FIELDS.has(key)) {
+    return <p className="whitespace-pre-line leading-relaxed text-ink-100/90">{raw}</p>;
+  }
+  return raw;
+}
+
+function fieldNeedsTopAlign(key: string): boolean {
+  return LIST_FIELDS.has(key) || PROSE_FIELDS.has(key);
 }
 
 function formatFunding(usd: number | null): string {
@@ -71,6 +138,7 @@ export default async function ProjectPage({ params }: PageProps) {
 
   const sectorAttrs = Object.entries(project.sector_attributes ?? {});
   const subsectorAttrs = Object.entries(project.subsector_attributes ?? {});
+  const canonical = isCanonicalProject(project);
 
   return (
     <section className="relative overflow-hidden">
@@ -90,8 +158,21 @@ export default async function ProjectPage({ params }: PageProps) {
           ]}
         />
 
-        <div className="mt-6 flex flex-wrap items-baseline gap-4">
-          <h1 className="font-display text-4xl font-semibold tracking-tight text-ink-50 sm:text-5xl">
+        {canonical && (
+          <div className="mt-6 inline-flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-amber-200">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Canonical Specification — authoritative source for this subsector
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-wrap items-baseline gap-4">
+          <h1
+            className={`font-display text-4xl font-semibold tracking-tight sm:text-5xl ${
+              canonical
+                ? "bg-gradient-to-r from-amber-200 via-ink-50 to-amber-200 bg-clip-text text-transparent"
+                : "text-ink-50"
+            }`}
+          >
             {project.name}
           </h1>
           {project.status && (
@@ -155,13 +236,15 @@ export default async function ProjectPage({ params }: PageProps) {
           <Section
             title={`${project.sector?.name ?? "Sector"} attributes`}
             subtitle="Fields common to every project in this sector."
+            accent={canonical ? "amber" : "default"}
           >
             <dl>
               {sectorAttrs.map(([key, value]) => (
                 <FieldRow
                   key={key}
                   label={humanLabel(key, project.sector?.common_field_schema)}
-                  value={formatValue(value)}
+                  value={formatValue(value, key)}
+                  alignTop={fieldNeedsTopAlign(key)}
                 />
               ))}
             </dl>
@@ -172,13 +255,15 @@ export default async function ProjectPage({ params }: PageProps) {
           <Section
             title={`${project.subsector?.name ?? "Subsector"} attributes`}
             subtitle="Fields specific to this subsector."
+            accent={canonical ? "amber" : "default"}
           >
             <dl>
               {subsectorAttrs.map(([key, value]) => (
                 <FieldRow
                   key={key}
                   label={humanLabel(key, project.subsector?.specific_field_schema)}
-                  value={formatValue(value)}
+                  value={formatValue(value, key)}
+                  alignTop={fieldNeedsTopAlign(key)}
                 />
               ))}
             </dl>
@@ -202,13 +287,18 @@ function Section({
   title,
   subtitle,
   children,
+  accent = "default",
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  accent?: "default" | "amber";
 }) {
+  const border =
+    accent === "amber" ? "border-amber-300/20" : "border-ink-700/60";
+  const bg = accent === "amber" ? "bg-amber-300/[0.03]" : "bg-ink-900/40";
   return (
-    <div className="mt-10 rounded-2xl border border-ink-700/60 bg-ink-900/40 p-5 sm:p-6">
+    <div className={`mt-10 rounded-2xl border ${border} ${bg} p-5 sm:p-6`}>
       <h2 className="font-display text-lg font-semibold text-ink-50">{title}</h2>
       {subtitle && <p className="mt-1 text-xs text-ink-300">{subtitle}</p>}
       <div className="mt-4">{children}</div>
