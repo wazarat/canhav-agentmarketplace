@@ -14,6 +14,17 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      # Supabase (Market Map). Values are set in the Render dashboard, not committed here.
+      # SUPABASE_URL          : https://<project-ref>.supabase.co
+      # SUPABASE_ANON_KEY     : anon JWT — used by /api/market-map/* on the live read path
+      # SUPABASE_SERVICE_ROLE_KEY : service-role JWT — only the ingest scripts need this, but
+      #                         setting it on Render is harmless and lets us run ad-hoc admin queries
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: ENVIRONMENT
         value: production
       - key: PYTHON_VERSION
