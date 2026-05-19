@@ -114,10 +114,13 @@ function apiBase(): string {
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${apiBase()}${path}`;
+  // During the M8 sector-by-sector build phase we want ingest results to appear immediately
+  // on the live site, not 60s later. Once data stabilizes we can re-enable ISR by replacing
+  // `cache: "no-store"` with `next: { revalidate: 60 }`.
   const res = await fetch(url, {
     ...init,
     headers: { Accept: "application/json", ...(init?.headers ?? {}) },
-    next: { revalidate: 60, ...(init as { next?: { revalidate?: number } } | undefined)?.next },
+    cache: "no-store",
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");

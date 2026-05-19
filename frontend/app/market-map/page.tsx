@@ -10,7 +10,9 @@ export const metadata: Metadata = {
     "A live, searchable map of projects building across the blockchain ecosystem. Sector by sector, curated by the CanHav research team.",
 };
 
-export const revalidate = 60;
+// M8 build phase: render fresh on every request so newly-ingested rows appear instantly.
+// Flip back to `export const revalidate = 60` once all 36 subsectors are seeded.
+export const dynamic = "force-dynamic";
 
 export default async function MarketMapPage() {
   let sectors: SectorSummary[] = [];

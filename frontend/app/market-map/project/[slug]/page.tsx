@@ -42,7 +42,7 @@ interface PageProps {
   params: { slug: string };
 }
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const project = await getProject(params.slug).catch(() => null);
