@@ -14,6 +14,76 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-20 15:50 — MEV & Block Builders Tier-1 enrichment + `_enrichment.py` helper extraction (M8.8)
+
+**Why.** M8.8 = MEV & Block Builders, the third subsector in the Core Protocol Architecture loop. 16 source rows across 4 archetypes (block builders, MEV relays, block-coupled searcher infrastructure, vertically-integrated MEV stacks). The v6 Perplexity drafts (`mev-block-builders.{narrative,data-sources,fields-to-add}.md`) defined the entity scope, the 4-archetype enum, the two dual-enum splits (censorship_policy × censorship_policy_layer; infrastructure_topology × infrastructure_advantage_source), and the universal-field applicability matrix. This subsector is the strongest case for the `maintaining_organization` SSoT pattern: 3 real-world companies (Flashbots, bloXroute Labs, Eden Network) back 11 of the 14 non-aggregate rows.
+
+**What changed.**
+
+Shared enrichment helper (new, used by Validators + MEV; deliberate partial generalization — see DECISIONS):
+- `.cursor/skills/market-map/scripts/_enrichment.py` (new, ~150 lines) — extracts the `OrgBaseline` dataclass + the three Supabase REST helpers (`upsert_organization`, `fetch_existing_project`, `patch_project`) + a string-normalization helper (`norm`) from the validators script. Import-only, no top-level side effects. Each per-subsector script keeps its own BASELINES, normalization tables, dual-enum maps, and `build_payload`.
+- `.cursor/skills/market-map/scripts/enrich_validators_staking_providers.py` — refactored to import from `_enrichment.py`. Pure deletion (~80 lines), no behavior change. Verified via `--dry-run` parity check before and after.
+- Full `enrich_clients.py` generalization deliberately deferred to subsector #4 (M8.9). The GitHub-telemetry shape used by Consensus + Execution and the org-FK shape used by Validators + MEV are different enough that folding them under one CLI is premature. Rationale captured in DECISIONS.
+
+MEV subsector schema (additive, JSONB-only):
+- `supabase/migrations/20260520_0005_mev_block_builders_schema.sql` (new) — replaces the placeholder `specific_field_schema` for `slug='mev-block-builders'` with the Tier-1 shape: `mev_subsector_type`, `operational_role`, `block_construction_authority`, `transaction_ordering_control`, `validator_access_path`, `validator_coverage_band`, `validator_coverage_pct`, `primary_mev_types` (array), `censorship_policy`, `censorship_policy_layer`, `censorship_policy_note`, `infrastructure_topology`, `infrastructure_advantage_source`, `infrastructure_control_note`, `vertical_integration_flag`, `vertical_integration_note`, `single_point_of_failure_risk`, `governance_influence_vector`, `protocol_influence_surface`, `mev_boost_relay_endpoint`, `data_refreshed_at`, `data_confidence`. Applied via the Supabase MCP. `additionalProperties: true` so Tier-2/3 fields land via future JSONB-only bumps.
+
+Local schemas + skill (gitignored under `.cursor/`):
+- `.cursor/skills/market-map/schemas/subsectors/mev-block-builders.json` — real definitions replacing the placeholder.
+- `.cursor/skills/market-map/schemas/subsectors/mev-block-builders.column_map.json` — covers all 19 sheet headers including the curly-apostrophe gotcha (`Practitioner\u2019s Note` uses U+2019). All verbose sheet enums land in `*_raw` keys at ingest. Six underscore-prefixed meta notes document (a) no `Maintaining Organization` column on this sheet, (b) the two dual-enum splits performed at enrichment time, (c) the `*_raw` → enum normalization, (d) the vertical-integration text-to-boolean split, (e) the primary_mev_types comma-list normalization, (f) the aggregate handling.
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/mev-block-builders.md` — rewritten from the v6 stub into a real implementation reference. Lists every entity + org slug, documents the 4 archetypes, embeds the dual-enum split rules and curated per-entity values, points at the enrichment script, calls out the cross-subsector ripple, includes the Lido relay-allow-list governance signal.
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/mev-block-builders.{narrative,data-sources,fields-to-add}.md` (new, mirrored from the v6 Perplexity drafts) — public-site narrative copy + authoritative sourcing guide + universal-field applicability matrix.
+
+Ingest:
+- `python .cursor/skills/market-map/scripts/ingest_subsector.py --slug mev-block-builders` — 16/16 rows upserted into `projects`. No validation failures.
+
+Enrichment script (new):
+- `.cursor/skills/market-map/scripts/enrich_mev_block_builders.py` — uses `_enrichment.py` for the org-FK plumbing. For each of the 16 baselines: (a) upsert the `maintaining_organization` row via `POST /rest/v1/organizations?on_conflict=slug` (deduped per run: the 3 multi-archetype orgs are written once, not 4×), (b) PATCH the project row's `maintaining_organization` FK + `is_aggregate` + `not_applicable_reason` + merged `subsector_attributes`. Normalizes 7 raw enum keys (`mev_subsector_type_raw`, `block_construction_authority_raw`, `transaction_ordering_control_raw`, `validator_access_path_raw`, `validator_coverage_band_raw`, `single_point_of_failure_risk_raw`, `governance_influence_vector_raw`, `protocol_influence_surface_raw`) via per-table mappings. Applies both dual-enum splits per per-baseline curation (NOT a generic mapping table — MEV policies are too entity-specific). Splits `vertical_integration_raw` text into typed boolean + note. Applies curated `validator_coverage_pct` (Flashbots Relay 55%, Flashbots Builder 40%, Titan 25%, bloXroute Relay 15%, Ultra Sound 12%, bloXroute Builder 8%, rsync 3%, Eden 2%) tagged `data_confidence='estimate'` until mevboost.pics is wired. Aggregates handled as `is_aggregate=true, maintaining_organization=null, not_applicable_reason='aggregate_category'`. Idempotent. Supports `--dry-run`.
+
+Curated org rows created by enrichment (6 new orgs):
+- `flashbots` — Flashbots Ltd., US, 2020, $60M Series B (Paradigm-led, July 2023), corporate.
+- `bloxroute-labs` — bloXroute Labs Inc., US (Chicago), 2017, $36M Series B (Pantera Series A 2018), corporate.
+- `eden-network` — Eden Network Ltd., UK, 2021, $17.4M seed (Multicoin/Wintermute, June 2021), corporate.
+- `titan-builders` — Titan Builder, distributed, 2023, no public funding, small independent team.
+- `ultrasound-money` — Ultra Sound Money, distributed, 2022, small community-led team, no formal incorporation (entity_type='company' with notes).
+- `rsync-builder` — rsync Builder, distributed, 2023, pseudonymous independent operator.
+
+Curated subsector telemetry applied (live, all 16 rows):
+- `mev_subsector_type` distribution: 4 block-builder, 4 mev-relay, 4 searcher-infrastructure (1 aggregate), 4 integrated-mev-stack (1 aggregate).
+- Dual-enum applied. Censorship-policy notables: Flashbots → `evolving` / `relay-enforced` (and `builder-enforced` for builder); Ultra Sound → `neutral` / `relay-enforced`; bloXroute → `configurable` / `relay-enforced`; Eden → `policy-driven` / `relay-enforced`. Infrastructure-topology notables: Flashbots Builder → `centralized` / `software-stack`; bloXroute → `centralized` / `networking-latency`; Eden → `centralized` / `validator-relationships`; aggregates → `federated` / `none-stated`.
+- `validator_coverage_pct` baselines applied per the curation list above. Flashbots integrated stack carries the dominant 55% headline figure (relay-level share is the most-watched MEV metric).
+- All `*_raw` ingest keys converted to enum keys; raw values preserved under `*_source` keys for traceability.
+
+Org-row footprint (the SSoT payoff in one query):
+- `flashbots` → 4 MEV subsector rows (builder, relay, searcher, integrated).
+- `bloxroute-labs` → 4 MEV subsector rows (builder, relay, searcher, integrated).
+- `eden-network` → 3 MEV subsector rows (relay, searcher, integrated).
+- 3 single-row orgs (`titan-builders`, `ultrasound-money`, `rsync-builder`) + 2 aggregates with `maintaining_organization=null`.
+
+Documentation (skills + repo docs):
+- `docs/DECISIONS.md` — two new top entries: (a) `_enrichment.py` partial-generalization rationale + the rule that defers full `enrich_clients.py` to subsector #4; (b) dual-enum splits happen at enrichment time with per-entity curation for nuanced subsectors like MEV.
+- `docs/CHANGELOG_DEV.md` — this entry.
+- `docs/FUTURE_PLANS.md` — new top entry on MEV Tier-2/3 fields (`ofac_filtering_pct`, `builder_pubkey`, `policy_last_changed_date`, `composite_concentration_score`) + the mevboost.pics / relayscan.io live integration. The pre-existing `enrich_clients.py` generalization entry updated to reflect the M8.8 partial extraction.
+
+**Files.**
+- `supabase/migrations/20260520_0005_mev_block_builders_schema.sql` (new)
+- `.cursor/skills/market-map/scripts/_enrichment.py` (new)
+- `.cursor/skills/market-map/scripts/enrich_mev_block_builders.py` (new)
+- `.cursor/skills/market-map/scripts/enrich_validators_staking_providers.py` (refactor: import from `_enrichment.py`)
+- `.cursor/skills/market-map/schemas/subsectors/mev-block-builders.json`
+- `.cursor/skills/market-map/schemas/subsectors/mev-block-builders.column_map.json`
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/mev-block-builders.{md,narrative.md,data-sources.md,fields-to-add.md}`
+- `docs/DECISIONS.md`, `docs/CHANGELOG_DEV.md`, `docs/FUTURE_PLANS.md`
+
+**Verified.**
+- Supabase MCP: `select count(*) from public.organizations` → 24 (8 backfilled + 10 validators + 6 MEV).
+- Supabase MCP: `select * from public.projects where subsector_slug='mev-block-builders'` → 16 rows, all with correct `maintaining_organization` FK (14) or `is_aggregate=true` (2).
+- Org-footprint query: `flashbots` 4 rows, `bloxroute-labs` 4 rows, `eden-network` 3 rows, single-org rows 3 rows, aggregates 2 rows. Matches the v6 spec.
+- Idempotency: re-running `enrich_mev_block_builders.py` with no input changes produces zero data drift.
+- Validators script post-refactor: `enrich_validators_staking_providers.py --dry-run` produces identical org/project payloads to the pre-refactor version.
+
+**Follow-ups.** Wire mevboost.pics / relayscan.io for `validator_coverage_pct` (still curated estimates). Tier-2 fields (`ofac_filtering_pct`, `builder_pubkey`, `policy_last_changed_date`, `composite_concentration_score`) parked in FUTURE_PLANS. The "Lido relay allow-list" cross-subsector governance signal should land on the subsector landing page when the UI loop reaches MEV. The full `enrich_clients.py` generalization remains parked for subsector #4 (M8.9).
+
 ## 2026-05-20 15:05 — Validators & Staking Providers Tier-1 enrichment + `public.organizations` table (M8.7)
 
 **Why.** M8.7 = Validators & Staking Providers, the 11-row subsector spanning 4 archetypes (professional operators, exchange validator ops, LST protocol operator sets, the solo-validator aggregate). The subsector exposes the cross-cutting "same company, many subsector rows" problem head-on (Coinbase, Kraken, Binance will all re-appear in Exchanges/Custody/Wallets later), so this pass also ships the new `public.organizations` table as the single source of truth for org-level universal fields. Three Perplexity-drafted reference docs (`validators-staking-providers.{narrative,data-sources,fields-to-add}.md`) defined the entity scope, Tier-1 fields, dual-enum mapping, and per-archetype universal-field applicability.

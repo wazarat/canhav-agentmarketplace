@@ -9,6 +9,59 @@ Each entry should answer:
 
 ---
 
+## MEV & Block Builders — Tier-2 / Tier-3 fields + mevboost.pics / relayscan.io integration
+
+**Status.** Deferred. Tier-1 (16 rows ingested + enriched, 6 new orgs, both dual-enum splits applied, validator coverage curated baselines) shipped on 2026-05-20.
+
+**Why deferred.** Tier-2 fields need a live mevboost.pics / relayscan.io integration (`validator_coverage_pct` is currently a curated baseline tagged `data_confidence='estimate'`; flipping to `verified` and refreshing weekly requires the cron runner). Tier-3 needs additional per-entity observability (per-builder `builder_pubkey` from on-chain block headers; `ofac_filtering_pct` from relay-level analysis). The "Lido relay allow-list" cross-subsector governance signal is the single most-valuable derived metric and is blocked on the same cron-runner work.
+
+**What is parked.**
+
+Schema:
+- `.cursor/skills/market-map/schemas/subsectors/mev-block-builders.json` is `additionalProperties: true`. Adding any field below later is a JSON-update on `public.subsectors.specific_field_schema` for `slug='mev-block-builders'`; no Postgres column migration required.
+- Supabase mirror: `supabase/migrations/20260520_0005_mev_block_builders_schema.sql` carries the Tier-1 shape. The next pass would be `20260???_0001_mev_block_builders_tier2_schema.sql`.
+
+Convention rails (already in the schema):
+- `subsector_attributes.data_refreshed_at` / `data_confidence`.
+- `subsector_attributes.censorship_policy` × `censorship_policy_layer` (dual-enum) — already shipped.
+- `subsector_attributes.infrastructure_topology` × `infrastructure_advantage_source` (dual-enum) — already shipped.
+- `subsector_attributes.validator_coverage_pct` (curated baseline) + `validator_coverage_band` (enum) — coexist; the band is the chart-friendly axis when the precise % is stale.
+
+**Tier 2 — Add when manual curation or simple live sources allow.**
+
+| Field                              | Shape                                                      | Source                                                |
+| ---------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------- |
+| `policy_last_changed_date`         | date                                                       | Manual (Flashbots blog, bloXroute blog)                |
+| `policy_history`                   | array of `{date, policy, layer, summary}`                  | Manual                                                |
+| `relay_endpoint_verified`          | boolean                                                    | Periodic ping of `mev_boost_relay_endpoint`            |
+| `ofac_filtering_pct`               | numeric (relay rows only)                                  | mevboost.pics live API                                 |
+| `non_filtering_relay`              | boolean (relay rows only)                                  | Derived from `censorship_policy='neutral'`             |
+| `builder_pubkey`                   | string (builder rows only)                                 | Observable on-chain                                    |
+| `builder_market_share_30d_pct`     | numeric (builder rows only)                                | mevboost.pics live API                                 |
+| `relay_subscriber_validator_pct`   | numeric (relay rows only)                                  | mevboost.pics / relayscan.io                           |
+
+**Tier 3 — Operational telemetry (cron-driven).**
+
+| Field                              | Refresh        | Source                                                |
+| ---------------------------------- | -------------- | ----------------------------------------------------- |
+| `validator_coverage_pct`           | Weekly         | mevboost.pics live API (replaces curated baseline)    |
+| `missed_slot_rate_30d_pct`         | Weekly         | relayscan.io                                          |
+| `bundle_inclusion_rate_30d_pct`    | Weekly         | libmev.com                                            |
+| `last_significant_incident`        | On publish     | Operator post-mortems + Twitter/X                     |
+
+**Composite metrics (computed view, not stored):**
+- `composite_concentration_score` = weighted (`validator_coverage_pct` × `vertical_integration_flag` × `single_point_of_failure_risk`). Useful as the headline chart for the subsector landing page.
+
+**The Lido relay allow-list signal.** When `validator_coverage_pct` is wired, the most-watched cross-subsector signal becomes the diff between Lido's relay allow-list and the broader validator population. Lido currently routes through ~5-6 relays; a single allow-list change can shift 25%+ of total MEV-Boost share. Future cross-subsector view: query `projects.subsector_attributes->'lido_allowlist'` on the Lido validator row (set when the Lido governance vote lands) joined against MEV relay rows.
+
+**To re-enable.**
+1. Wire `https://mevboost.pics/api` (or scrape the dashboard JSON) into `scripts/refresh_mev_telemetry.py`. Map each relay/builder name → `projects.slug` (manual mapping table for the first cut).
+2. Promote `validator_coverage_pct` from `data_confidence='estimate'` to `verified` for the touched rows.
+3. Author `enrich_mev_tier2.py` per the script-per-tier convention (or fold into the generic `enrich_clients.py` if subsector #4 motivates extracting it).
+4. Stand up a weekly cron (Supabase Edge Function or GitHub Actions) to call the refresh script.
+
+---
+
 ## Organizations table — UI cutover + drop duplicated universal fields from `projects`
 
 **Status.** Deferred. The `public.organizations` table shipped on 2026-05-20 (migration `20260520_0003`) and is the new source of truth for org-level universal fields. The duplicated columns on `public.projects` (`founded_year`, `hq_country`, `team_size_range`, `twitter_handle`, `total_funding_usd`, `last_funding_round`, `last_funding_date`, `stage`) are still in place, and so is the legacy `sector_attributes.maintaining_organization` JSONB key. This is intentional — dropping them now would require simultaneously cutting the frontend over to read from the org row via a join.
@@ -178,25 +231,28 @@ Ingest source: `https://eips.ethereum.org/eip/<n>.json` (machine-readable per EI
 
 ---
 
-## Generalize `enrich_<subsector>.py` → `enrich_clients.py`
+## Generalize `enrich_<subsector>.py` → `enrich_clients.py` (post-M8.8 status)
 
-**Status.** Deferred until subsector #3 (Validators & Staking Providers, M8.7).
+**Status.** Partially landed. **Deferred completion until subsector #4 (M8.9).**
 
-**Why deferred.** See `docs/DECISIONS.md` 2026-05-20. Two instances isn't enough to know the right abstraction.
+**What landed at M8.8 (2026-05-20).** The genuinely shared mechanics across the 4 enrichment scripts — `OrgBaseline` dataclass + the three Supabase REST helpers (`upsert_organization`, `fetch_existing_project`, `patch_project`) + a string-normalization helper (`norm`) — were extracted into `.cursor/skills/market-map/scripts/_enrichment.py`. `enrich_validators_staking_providers.py` and `enrich_mev_block_builders.py` import from it; the older `enrich_consensus_layer.py` and `enrich_execution_layer.py` were left untouched in this pass because their GitHub-telemetry helpers are not yet shared by any other script. See `docs/DECISIONS.md` 2026-05-20 (`_enrichment.py` extraction rationale) for the full reasoning.
+
+**Why still deferred.** Two scripts now use the org-FK shape (Validators, MEV); two use the GitHub-telemetry shape (Consensus, Execution). It's still ambiguous whether the GitHub helpers should fold into `_enrichment.py` or live elsewhere — folding them now would push dead code onto Validators/MEV. The fourth subsector to use either shape is what will resolve the ambiguity.
 
 **What is parked.**
 
-- `.cursor/skills/market-map/scripts/enrich_consensus_layer.py` — 431-line script with `BASELINES` for the 5 consensus clients.
-- `.cursor/skills/market-map/scripts/enrich_execution_layer.py` — near-twin, ~360 lines, `BASELINES` for the 4 execution clients + `DIVERSITY_MAP`.
-- Shared shape: `ClientBaseline` dataclass + GitHub helpers (`gh_get`, `fetch_repo_created_year`, `fetch_latest_release`, `fetch_contributors_last_90d`) + Supabase helpers (`fetch_existing_row`, `patch_row`) + a `main()` loop with `--dry-run` and `--skip-github`.
+- `.cursor/skills/market-map/scripts/enrich_consensus_layer.py` — 431-line script with `BASELINES` for the 5 consensus clients. Still inline-defines its GitHub helpers + Supabase PATCH helper.
+- `.cursor/skills/market-map/scripts/enrich_execution_layer.py` — near-twin, ~360 lines, `BASELINES` for the 4 execution clients + `DIVERSITY_MAP`. Still inline-defines its GitHub helpers.
+- `.cursor/skills/market-map/scripts/_enrichment.py` — already has the org-FK + normalization helpers shared by Validators + MEV.
+- Shared shape (Consensus + Execution): `ClientBaseline` dataclass + GitHub helpers (`gh_get`, `fetch_repo_created_year`, `fetch_latest_release`, `fetch_contributors_last_90d`).
 
-**To re-enable later.**
+**To re-enable later (after subsector #4 ships).**
 
-1. After M8.7 ingest, audit how Validators differs (does it need beaconcha.in telemetry? per-validator uptime? slashing attribution?).
-2. Extract shared logic to `.cursor/skills/market-map/scripts/_enrichment.py`: `gh_get`, `fetch_repo_created_year`, `fetch_latest_release`, `fetch_contributors_last_90d`, `fetch_existing_row`, `patch_row`, `build_payload(baseline, github, existing, refreshed_at, share_pct_field_name)`.
-3. Create `enrich_clients.py` with CLI `--subsector <slug>` that loads `from baselines.<slug> import BASELINES, DIVERSITY_MAP, SHARE_PCT_FIELD_NAME`.
-4. Create `.cursor/skills/market-map/scripts/baselines/{consensus_layer,execution_layer,validators_staking_providers}.py` modules. Each exposes `BASELINES`, `DIVERSITY_MAP` (or `None` if not applicable), `SHARE_PCT_FIELD_NAME` (`validator_share_pct` / `execution_share_pct` / etc.).
-5. Replace the two per-subsector scripts with two-line wrappers that import and dispatch.
+1. Audit how subsector #4 fits — does it use the org-FK shape (Validators/MEV cluster) or the GitHub-telemetry shape (Consensus/Execution cluster) or something new?
+2. If it uses GitHub telemetry, fold `gh_get` / `fetch_repo_created_year` / `fetch_latest_release` / `fetch_contributors_last_90d` into `_enrichment.py` (with a clear "Optional[github]" param surface so org-FK-only scripts don't carry the import).
+3. Create `enrich_clients.py` with CLI `--subsector <slug>` that loads `from baselines.<slug> import BASELINES, DIVERSITY_MAP, SHARE_PCT_FIELD_NAME` (or the orgs-only equivalent).
+4. Create `.cursor/skills/market-map/scripts/baselines/{consensus_layer,execution_layer,validators_staking_providers,mev_block_builders}.py` modules. Each exposes its registry + per-subsector helpers.
+5. Replace the four per-subsector scripts with two-line wrappers that import and dispatch.
 
 ---
 

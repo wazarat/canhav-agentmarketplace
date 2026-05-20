@@ -6,6 +6,51 @@
 
 ---
 
+## 2026-05-20 — Extract `_enrichment.py` (org-FK helpers only); defer full `enrich_clients.py` generalization to subsector #4
+
+**Context.** M8.8 (MEV & Block Builders) is the third subsector to ship a Tier-1 enrichment script. M8.5 (Consensus) and M8.6 (Execution) share a GitHub-telemetry shape (`founded_year` / `latest_release_*` / `contributors_last_90d` from the GitHub REST API). M8.7 (Validators) and M8.8 (MEV) share a fundamentally different shape: no GitHub telemetry, but heavy use of the `public.organizations` upsert-by-slug pattern plus per-baseline dual-enum splits. The user asked at M8.8 kickoff to evaluate generalizing the four scripts into a single `enrich_clients.py --subsector <slug>` before writing the MEV one.
+
+After looking at the four scripts side-by-side, the cleanest extraction is *not* the full `enrich_clients.py`. The GitHub helpers (Consensus + Execution) and the org-FK helpers (Validators + MEV) are two distinct cluster shapes; folding them together would force a confusing union type. The genuinely shared mechanics across **all four** is narrower: the `OrgBaseline` dataclass + the three Supabase REST helpers (`upsert_organization`, `fetch_existing_project`, `patch_project`) + a small string-normalization helper (`norm`). Validators uses all four; MEV uses all four; Consensus + Execution don't use the org-upsert helper (their orgs were backfilled inline in the M8.7 migration) but use the project-PATCH helper.
+
+**Decision.** Extract exactly this shared surface into `.cursor/skills/market-map/scripts/_enrichment.py` as part of M8.8. Refactor `enrich_validators_staking_providers.py` to import from it (light touch — pure deletion, no logic change). Write `enrich_mev_block_builders.py` from scratch using the new module. Leave `enrich_consensus_layer.py` + `enrich_execution_layer.py` untouched in this pass — their GitHub helpers are valuable enough on their own to stay in-script for now, and rewriting them mid-M8 would risk telemetry drift.
+
+The full `enrich_clients.py` generalization (the one described in `docs/FUTURE_PLANS.md`) is deliberately deferred to **subsector #4** (whichever is next after MEV). The fourth instance is what will tell us whether the GitHub-telemetry shape genuinely belongs in the generic loop or is permanently Consensus/Execution-only.
+
+**Consequences.**
+- `_enrichment.py` is ~150 lines of focused helpers with no top-level side effects. Importing is cheap. Each per-subsector script keeps its own BASELINES, normalization tables, dual-enum maps, and `build_payload`.
+- The validators refactor deleted ~80 lines of duplicated code without changing observed behavior (verified via `--dry-run` parity check before and after).
+- The decision rule is now codified in code: anything shared by ≥2 enrichment scripts that does NOT depend on subsector-specific schema goes in `_enrichment.py`. Anything subsector-specific stays in the per-subsector script.
+- `OrgBaseline` is now a single canonical dataclass. Future enrichment scripts that need an org reference type-annotated their imports cleanly.
+
+**Alternatives considered.**
+- *Ship the full `enrich_clients.py` now.* Rejected — the GitHub-telemetry shape and the org-FK shape are genuinely different. Forcing them under one CLI would either re-introduce per-subsector if/else branches in `main()` (the kind of code we're trying to avoid) or push the GitHub helpers into the generic path, where they'd be dead code for Validators/MEV/all future non-client subsectors.
+- *Don't extract anything; copy-paste between Validators and MEV.* Rejected — that's the path that ends with five copies of `upsert_organization` and a subtle drift bug in one of them.
+- *Wait until subsector #4 to extract anything.* Rejected — the org-FK plumbing is genuinely the same code in both scripts already, and the `_enrichment.py` extraction is mechanical. Deferring it makes both scripts harder to read.
+
+**When to revisit.** When subsector #4 ships (M8.9). If it also uses the org-FK shape, the abstraction is correct. If it uses GitHub telemetry like Consensus/Execution, fold their helpers into `_enrichment.py` and write the generic `enrich_clients.py` then.
+
+---
+
+## 2026-05-20 — Apply dual-enum splits at enrichment time (NOT at ingest); curate per-entity for nuanced subsectors like MEV
+
+**Context.** MEV & Block Builders has two source-sheet cells that collapse two axes each: `Censorship or Filtering Policies` (what + where) and `Infrastructure Control` (shape + moat source). The v6 doc proposed splitting them at import. The Validators dual-enum (`client_diversity_risk` × `client_diversity_role`) is split by a generic phrase-to-pair mapping table because the source phrases are stable; MEV's phrases are more nuanced and would not map cleanly through a generic table (e.g. Flashbots Relay's `evolving` policy needs `relay-enforced` layer, but the bloXroute relay's `configurable` policy needs `relay-enforced` for a *different* reason — it's a multi-flavor relay, not a policy reversal).
+
+**Decision.** Apply both MEV dual-enum splits in `enrich_mev_block_builders.py`, at enrichment time, with per-baseline curated values rather than via a generic mapping table. The verbatim sheet cell is preserved under a `*_source` key (`censorship_policy_source`, `infrastructure_control_source`) so the curator can audit the mapping later. Same script handles the third "mini-split": `vertical_integration_raw` → `vertical_integration_flag` (typed boolean) + `vertical_integration_note` (free text).
+
+For Validators (M8.7), the existing phrase-to-pair `DIVERSITY_MAP` is the right shape because the 9 source phrases are stable across years and operators. For MEV, the policy landscape is too dynamic and entity-specific for a generic table. The per-baseline curation pattern is what we use whenever the "row context" is needed to interpret the sheet cell.
+
+**Consequences.**
+- `enrich_mev_block_builders.py` has ~16 lines of curated values per entity (where Validators has ~1 line of phrase lookup) but the values are auditable side-by-side with the entity's other curated fields.
+- Adding a new MEV entity requires hand-curating its dual-enum quadruple, not just adding a phrase to a map. This is correct: the curator should think about the policy landscape per-entity, not delegate to a one-size-fits-all mapping.
+- Future subsectors that introduce their own multi-axis sheet cells follow the same rule: if the source phrases are stable → mapping table; if they're per-entity nuanced → curated per baseline.
+
+**Alternatives considered.**
+- *Build a generic MEV mapping table.* Rejected — would either be too coarse (collapsing important distinctions like "evolving" vs "configurable") or too long (one entry per entity, defeating the abstraction).
+- *Land the dual-enum in the sheet as separate columns.* Rejected — we don't own the sheet; the upstream curators won't reshape their headers for our schema.
+- *Split lazily in the UI.* Rejected — querying by single-axis values (e.g. "all relays with `policy='neutral'`") requires the split to be in the storage layer.
+
+---
+
 ## 2026-05-20 — Introduce `public.organizations` table; `maintaining_organization` becomes a typed FK on `public.projects`
 
 **Context.** The market map has a structural problem the first two subsectors masked but the Validators subsector exposes head-on: the same real-world company appears in many subsector rows. Coinbase shows up in Validators (as `Coinbase (Validator Operations)`) and will later show up in Custody, Exchanges, On/Off-Ramps, and Wallets. Today, each of those would be a duplicated row with its own copy of `hq_country`, `founded_year`, `total_funding_usd`, `twitter_handle` — guaranteed to drift out of sync. Same problem for Consensys (Teku + Besu today, MetaMask + Infura + Linea tomorrow) and the Ethereum Foundation (Geth + Yellow Paper + Execution EIPs + Consensus Specs today, plus future ecosystem programs).
