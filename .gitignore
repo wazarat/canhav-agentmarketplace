@@ -1,6 +1,11 @@
 # Cursor IDE — agent skills, plans, settings (kept local, not pushed)
 .cursor/
 
+# M8.9 — GitHub ETag cache used by backend/scripts/ingest_network_upgrades.py
+# to avoid burning rate limit on unchanged EIP / spec files. Cached separately
+# in CI via actions/cache.
+.cache/
+
 # Dependencies
 node_modules/
 .pnp

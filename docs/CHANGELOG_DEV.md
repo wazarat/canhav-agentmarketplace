@@ -14,6 +14,72 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-20 16:10 — Network Upgrades dedicated 4-table schema + weekly GitHub ingestion worker (M8.9)
+
+**Why.** M8.9 = Network Upgrades, the fifth subsector in the Core Protocol Architecture loop and the first one that *deliberately breaks* the entity model used by Consensus, Execution, Validators, and MEV. Network Upgrades models *events* (London, The Merge, Shapella, Dencun, Pectra, Fusaka, Glamsterdam), not organizations. The v6 design tried to fold them into `projects` with `entity_type='network_upgrade'`; the v7 Perplexity drafts (`network-upgrades.{narrative,data-sources,fields-to-add}.md`, mirrored under `.cursor/skills/`) prescribe a dedicated 4-table relational schema and a free, fully-automated weekly ingestion worker pulling from `ethereum/EIPs`, `ethereum/consensus-specs`, `ethereum/execution-specs`, and `ethereum/pm`. No paid data vendor required.
+
+The unique value this subsector contributes to the canhav market map: the `upgrade_impact` join table, which answers cross-subsector questions like "Which validator operators are affected by Pectra account abstraction?" or "Show every execution client that had to ship a breaking change for Dencun" with a single join. The previous 4 M8 subsectors all have rich rows in `public.projects` but no way to express "this row is affected by event X" — Network Upgrades supplies that missing edge.
+
+**What changed.**
+
+Schema (new dedicated relational tables — additive, no breakage to existing rows):
+- `supabase/migrations/20260520_0006_network_upgrades_schema.sql` (new) — introduces `public.network_upgrades`, `public.eips`, `public.upgrade_eips`, `public.upgrade_impact`, and the `public.upgrade_full_view` JOIN view. All four tables RLS-on + public-readable + service-role writes. Updated-at trigger via shared `public.touch_updated_at()`. Composite-PK gotcha for `upgrade_impact`: `affected_entity_slug` defaults to `'*'` as the wildcard sentinel because Postgres does not allow NULL in PK columns. `NOT VALID` CHECK constraint on `network_upgrades` enforces `status='activated' ⇒ activation_date is not null`. Adds the `protocol_event_not_entity` value to the documented `not_applicable_reason` enum (column has no CHECK constraint, so this is a comment-only addition). Replaces the placeholder `specific_field_schema` on `public.subsectors WHERE slug='network-upgrades'` with the pointer-shape JSON Schema. Applied via the Supabase MCP.
+
+Worker (new — first M8 ingest script tracked under `backend/` rather than `.cursor/`):
+- `backend/scripts/ingest_network_upgrades.py` (new, ~700 lines) — pulls every EIP markdown file from `ethereum/EIPs` (Git Trees API, single recursive call), parses YAML front-matter via `python-frontmatter`, walks consensus-specs `specs/` and execution-specs `src/ethereum/forks/` directories for sanity-check fork-name logging, and upserts:
+  - `public.eips` (~920 EIPs at first run; placeholders inserted for any curated baseline EIP not yet in the upstream repo so the FK on `upgrade_eips` holds).
+  - `public.network_upgrades` (7 rows from the curated `UPGRADE_BASELINES`: London, The Merge, Shapella, Dencun, Pectra, Fusaka, Glamsterdam).
+  - `public.upgrade_eips` (wipe-and-replace per upgrade slug → headline + supporting EIPs).
+  - `public.upgrade_impact` (filtered against `KNOWN_IMPACT_SUBSECTORS={consensus-layer, execution-layer, validators-staking-providers, mev-block-builders}` to keep the FK on `public.subsectors` valid; skipped rows surfaced in the run summary).
+  - `public.projects` mirror row per upgrade — every universal field NULL, `not_applicable_reason='protocol_event_not_entity'`, `subsector_attributes` carries only `{network_upgrade_slug, status, activation_date, layers_affected, primary_change_types, eips_count, impact_count, data_refreshed_at, data_confidence}`.
+
+  Worker uses ETag caching at `.cache/github-etags.json` (gitignored, persisted across CI runs via `actions/cache@v4`) so unchanged EIP files return 304 free of rate-limit cost. Authenticates with `GITHUB_TOKEN` (5000 req/h); degrades gracefully to unauthenticated (60 req/h) with a warning. Idempotent — re-running with no upstream change produces zero drift. Supports `--dry-run` and `--eip-limit N` for debugging.
+
+GitHub Actions workflow (new):
+- `.github/workflows/ingest-network-upgrades.yml` (new) — weekly cron at Monday 06:00 UTC (catches the prior Thursday ACD scope edits). `workflow_dispatch` available with `dry_run` toggle. Requires repo secrets `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`; optional `INGEST_GITHUB_TOKEN` (falls back to the workflow `GITHUB_TOKEN`).
+
+Dependencies:
+- `backend/requirements.txt` adds `python-frontmatter==1.1.0` for EIP YAML front-matter parsing.
+- `.gitignore` adds `.cache/` so the local ETag cache stays out of git.
+
+Curated baselines (in `UPGRADE_BASELINES`):
+- `london` — 2021-08-05, block 12,965,000, EIP-1559 headline + 4 supporting EIPs, 2 impact rows (execution-layer breaking-change, mev-block-builders new-capability).
+- `the-merge` — 2022-09-15, block 15,537,393, epoch 144,896, EIP-3675 headline + EIP-4399 supporting, 4 impact rows across consensus + execution + validators + MEV.
+- `shapella` — 2023-04-12, epoch 194,048, EIP-4895 headline + 4 supporting EIPs, 3 impact rows.
+- `dencun` — 2024-03-13, epoch 269,568, EIP-4844 headline + 7 supporting EIPs, 3 impact rows.
+- `pectra` — 2025-05-07, EIP-7702 headline + 7 supporting EIPs (MaxEB, EL-triggered withdrawals, BLS12-381 precompiles, …), 4 impact rows.
+- `fusaka` — 2025-12-03, EIP-7594 (PeerDAS) headline + EIP-7691 supporting, 3 impact rows.
+- `glamsterdam` — Planned, `is_provisional=true`, empty `eip_headlines` (ACD has not locked scope), 2 `requires-coordination` impact rows for MEV + Validators.
+
+Local skill / schema (gitignored under `.cursor/`):
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/network-upgrades.md` — rewritten from the v6 stub into the M8.9 implementation reference (event-vs-entity rationale, 4-table layout, worker description, universal-field handling matrix, 7 curated baselines, data-gaps).
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/network-upgrades.{narrative,data-sources,fields-to-add}.md` (new — mirrored from `~/Downloads/canhav-core-protocol-skills-v7/`).
+- `.cursor/skills/market-map/schemas/subsectors/network-upgrades.json` — pointer-shape JSON Schema (matches the migration's `specific_field_schema` update).
+- `.cursor/skills/market-map/schemas/subsectors/network-upgrades.column_map.json` — marked DO-NOT-USE with `ingest_subsector.py`; explicit redirect to the worker.
+
+Documentation:
+- `docs/DECISIONS.md` — new top entry: Network Upgrades gets its own dedicated 4-table relational schema instead of folding into `projects.subsector_attributes` (alternatives considered + when to revisit).
+- `docs/CHANGELOG_DEV.md` — this entry.
+- `docs/FUTURE_PLANS.md` — new top entry: Network Upgrades Tier-2/3 follow-ups (pre-Merge backfill, `client_readiness` table, `ethereum/pm` tracker auto-discovery, `eip_authors` social-graph table, testnet-activation ladder).
+
+**Files.**
+- `supabase/migrations/20260520_0006_network_upgrades_schema.sql` (new)
+- `backend/scripts/__init__.py`, `backend/scripts/ingest_network_upgrades.py` (new)
+- `backend/requirements.txt` (add `python-frontmatter==1.1.0`)
+- `.github/workflows/ingest-network-upgrades.yml` (new)
+- `.gitignore` (+ `.cache/`)
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/network-upgrades.{md,narrative.md,data-sources.md,fields-to-add.md}`
+- `.cursor/skills/market-map/schemas/subsectors/network-upgrades.{json,column_map.json}`
+- `docs/DECISIONS.md`, `docs/CHANGELOG_DEV.md`, `docs/FUTURE_PLANS.md`
+
+**Verified.**
+- Supabase MCP: all 4 tables created. `select table_name from information_schema.tables where table_schema='public' and table_name in ('network_upgrades','eips','upgrade_eips','upgrade_impact')` → 4 rows.
+- Supabase MCP: `select viewname from pg_views where schemaname='public' and viewname='upgrade_full_view'` → 1 row.
+- Supabase MCP: `select jsonb_pretty(specific_field_schema) from public.subsectors where slug='network-upgrades'` → returns the new pointer-shape schema.
+- Worker smoke test: `python backend/scripts/ingest_network_upgrades.py --dry-run --eip-limit 5` → 920 EIP files discovered, 7 baselines materialized, 30 `upgrade_eips`, 21 `upgrade_impact`, 7 project mirror rows. consensus-specs forks observed: `['_features', 'altair', 'bellatrix', 'capella', 'deneb', 'electra', 'fulu', 'gloas', 'heze', 'phase0']` (gloas + heze surfaced as the next two consensus-side forks beyond Fulu — useful early signal for future curated baselines). execution-specs forks observed via the new `src/ethereum/forks/` path.
+
+**Follow-ups.** Configure repo secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, optional `INGEST_GITHUB_TOKEN`) so the weekly GitHub Action can actually run. Trigger the first real ingest manually via `workflow_dispatch` on the Actions tab to populate the tables, then let the cron take over. Pre-Merge upgrade backfill (Frontier → Berlin), `client_readiness` table, `ethereum/pm` tracker auto-discovery, `eip_authors` social-graph table, and testnet-activation ladder all parked in `docs/FUTURE_PLANS.md`. The frontend `/market-map/core-protocol-architecture/network-upgrades` route should switch from listing `projects` to listing `upgrade_full_view` once the M8 UI loop reaches this subsector.
+
 ## 2026-05-20 15:50 — MEV & Block Builders Tier-1 enrichment + `_enrichment.py` helper extraction (M8.8)
 
 **Why.** M8.8 = MEV & Block Builders, the third subsector in the Core Protocol Architecture loop. 16 source rows across 4 archetypes (block builders, MEV relays, block-coupled searcher infrastructure, vertically-integrated MEV stacks). The v6 Perplexity drafts (`mev-block-builders.{narrative,data-sources,fields-to-add}.md`) defined the entity scope, the 4-archetype enum, the two dual-enum splits (censorship_policy × censorship_policy_layer; infrastructure_topology × infrastructure_advantage_source), and the universal-field applicability matrix. This subsector is the strongest case for the `maintaining_organization` SSoT pattern: 3 real-world companies (Flashbots, bloXroute Labs, Eden Network) back 11 of the 14 non-aggregate rows.

@@ -6,6 +6,42 @@
 
 ---
 
+## 2026-05-20 — Network Upgrades gets a dedicated 4-table relational schema (event-shaped); mirror one row per upgrade into public.projects with `not_applicable_reason='protocol_event_not_entity'`
+
+**Context.** M8.9 (Network Upgrades) is the first subsector that does not fit the entity model used by Consensus, Execution, Validators, and MEV. Network Upgrades models *events* — discrete, time-stamped protocol transitions (London, The Merge, Shapella, Dencun, Pectra, Fusaka, Glamsterdam …) — not organizations. The v6 design tried to fold upgrades into `public.projects` with `entity_type='network_upgrade'`, leaving every universal field (HQ, funding, Twitter, `maintaining_organization`) NULL. Two problems with that approach:
+
+1. **Data loss.** The interesting payload for an upgrade is its EIPs and its cross-subsector impact. Stuffing both into `subsector_attributes` JSONB would either inflate the row size or require multiple sibling JSON shapes the validator cannot enforce.
+2. **No cross-subsector join.** The single highest-leverage feature Network Upgrades can deliver — "which validator operators / clients / MEV relays are affected by Pectra?" — requires a *join table* on the event side. Storing that in JSONB makes it un-queryable.
+
+The v7 Perplexity drafts (`network-upgrades.fields-to-add.md`, mirrored under `.cursor/skills/`) prescribe a small relational schema instead: `network_upgrades` (the event), `eips` (the artifact registry), `upgrade_eips` (which EIPs ship in which upgrade), `upgrade_impact` (which subsector rows are affected and how).
+
+**Decision.** Ship the dedicated 4-table relational schema in `supabase/migrations/20260520_0006_network_upgrades_schema.sql`. The substance of an upgrade lives in those tables; the `public.projects` table gets a thin **mirror row** per upgrade with:
+
+- Every universal column NULL (`hq_country`, `founded_year`, `total_funding_usd`, `twitter_handle`, `github_url`, `team_size_range`, `last_funding_*`, `stage`, `logo_url`, `maintaining_organization`).
+- `not_applicable_reason='protocol_event_not_entity'` — new documented enum value alongside the existing `aggregate_category | dao_governed | protocol_specification | distributed_collective`. The column has no CHECK constraint by design (M8.7 decision), so the addition is a comment-only update.
+- `subsector_attributes` carrying only a pointer + computed metadata: `{network_upgrade_slug, status, activation_date, layers_affected, primary_change_types, eips_count, impact_count, data_refreshed_at, data_confidence}`.
+
+The mirror row exists only so that `/market-map/core-protocol-architecture/network-upgrades` works without per-subsector UI special-casing. The rich payload lives in the 4 tables and is exposed via `public.upgrade_full_view`, which JOINs them into one denormalized row per upgrade.
+
+`upgrade_impact` is the **killer table**: composite PK `(upgrade_slug, affected_subsector, affected_entity_slug, impact_type)`. Because Postgres does not allow NULL in PK columns and the spec needs "applies to every row in the subsector", `affected_entity_slug` uses `'*'` as a wildcard sentinel. The application is required to honor that convention.
+
+**Consequences.**
+- Cross-subsector queries become trivial. "All execution clients affected by Dencun" = `SELECT p.* FROM upgrade_impact ui JOIN projects p ON p.subsector_slug = ui.affected_subsector WHERE ui.upgrade_slug='dencun' AND ui.affected_subsector='execution-layer'` (handle `'*'` in application code).
+- Adding a new upgrade is a single `UpgradeBaseline` entry in `backend/scripts/ingest_network_upgrades.py` — no schema churn.
+- The 4-table schema is the precedent for future event-shaped subsectors. If a follow-up sector ever needs another (e.g. "Security Incidents" — events with affected entities), we copy this pattern instead of inventing a new one.
+- The `projects` mirror row keeps the universal Market Map UI navigation simple. The cost is one extra row per upgrade (cheap) and the discipline of remembering to set `not_applicable_reason='protocol_event_not_entity'` whenever a new mirror row is written (codified in the worker's `build_projects_mirror_row`).
+- The ingestion path is the FIRST `backend/`-tracked M8 script (vs the local-only `.cursor/skills/.../scripts/` for Consensus/Execution/Validators/MEV). The worker must be tracked so a free GitHub Action can run it weekly.
+
+**Alternatives considered.**
+- *Fold upgrades into `public.projects` with `entity_type='network_upgrade'` and stash everything in `subsector_attributes`.* Rejected — un-queryable for cross-subsector impact (the key feature), and the universal columns would all be `NULL` anyway. Worse data shape with no upside.
+- *Build only `public.network_upgrades` + `public.eips`; skip `upgrade_eips` and `upgrade_impact`.* Rejected — both joins are what make the data interesting. Without `upgrade_impact` we just have a prettier upgrade list; with it, we have the unique value proposition.
+- *Make `upgrade_impact.affected_entity_slug` nullable with a unique partial index instead of `'*'` wildcard.* Rejected — Postgres PKs require NOT NULL. Wrapping the join in a unique index plus a non-PK surrogate column is workable but uglier than the `'*'` sentinel; the sentinel makes the wildcard semantic visible at every read site.
+- *Run the ingest from Render's cron instead of GitHub Actions.* Rejected for now — Render's cron requires a paid plan tier and adds coupling between deployment and ingestion cadence. GitHub Actions is free, decoupled, and the natural home for "pull public data once a week".
+
+**When to revisit.** If a sibling subsector (e.g. "Security Incidents", "Governance Votes") also lands as event-shaped, we factor the common pattern into a small shared helper (similar to the M8.8 `_enrichment.py` extraction). Until then, the per-subsector worker pattern is fine.
+
+---
+
 ## 2026-05-20 — Extract `_enrichment.py` (org-FK helpers only); defer full `enrich_clients.py` generalization to subsector #4
 
 **Context.** M8.8 (MEV & Block Builders) is the third subsector to ship a Tier-1 enrichment script. M8.5 (Consensus) and M8.6 (Execution) share a GitHub-telemetry shape (`founded_year` / `latest_release_*` / `contributors_last_90d` from the GitHub REST API). M8.7 (Validators) and M8.8 (MEV) share a fundamentally different shape: no GitHub telemetry, but heavy use of the `public.organizations` upsert-by-slug pattern plus per-baseline dual-enum splits. The user asked at M8.8 kickoff to evaluate generalizing the four scripts into a single `enrich_clients.py --subsector <slug>` before writing the MEV one.

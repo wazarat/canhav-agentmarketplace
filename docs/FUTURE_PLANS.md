@@ -9,6 +9,47 @@ Each entry should answer:
 
 ---
 
+## Network Upgrades — Tier-2 / Tier-3 follow-ups (pre-Merge backfill, client_readiness, eip_authors, testnet ladder, pm tracker auto-discovery)
+
+**Status.** Deferred. Tier-1 (4-table relational schema + weekly worker for ~920 EIPs + 7 curated upgrade baselines + cross-subsector `upgrade_impact` rows) shipped 2026-05-20 as M8.9.
+
+**Why deferred.** The Tier-1 ingest already covers every named upgrade since London (Aug 2021) and pulls EIPs continuously. The follow-ups below are real value-adds but each requires either editorial backfill or per-source parsing work that the current free-API stack does not handle automatically.
+
+**What is parked.**
+
+- `supabase/migrations/20260520_0006_network_upgrades_schema.sql` ships the 4 tables: `network_upgrades`, `eips`, `upgrade_eips`, `upgrade_impact` + the `upgrade_full_view` join. Schema is `additionalProperties: true` on the pointer-shape `subsector_attributes` so future computed fields land via a JSONB schema bump rather than a Postgres migration.
+- `backend/scripts/ingest_network_upgrades.py` ships the worker with a `UPGRADE_BASELINES` Python table and a `KNOWN_IMPACT_SUBSECTORS` allow-list. Adding new upgrades or wiring new impact subsectors is a single edit.
+- `.github/workflows/ingest-network-upgrades.yml` ships the weekly cron and the ETag cache rails.
+
+**Tier 2 — Editorial backfill + scope refinement.**
+
+| Item | Source | Effort |
+|---|---|---|
+| Pre-Merge upgrade backfill (Frontier, Homestead, DAO Fork, Tangerine Whistle, Spurious Dragon, Byzantium, Constantinople, Istanbul, Muir Glacier, Berlin) | `ethereum.org/history` markdown source on `ethereum/ethereum-org-website` (MIT for code, CC-BY-4.0 for content) | ~3 hours to author 10 `UpgradeBaseline` entries; impact rows can be sparse for early forks |
+| Glamsterdam scope lock-in | `ethereum/pm` tracker issue (curated in `source_pm_issue_url`) | Edit `UPGRADE_BASELINES` when ACD finalizes ePBS-related EIPs |
+| Cross-subsector impact backfill for currently-non-ingested subsectors | When `data-availability-systems`, `optimistic-rollups`, `zk-rollups` ship, add their slugs to `KNOWN_IMPACT_SUBSECTORS` and backfill Dencun + Fusaka rows | Per-subsector ~30 min |
+| Activation block numbers for Pectra + Fusaka | Etherscan (Pectra), beaconcha.in (Fusaka epoch) | Manual lookup; backfill via PATCH |
+
+**Tier 3 — New tables / auto-discovery.**
+
+| Item | Why parked | To re-enable |
+|---|---|---|
+| `client_readiness` table (per-client per-fork `min_version` + `readiness_status`) | Requires per-client release-note parsing across all Consensus + Execution clients — high cost relative to one-time editorial value | When the M8 UI loop reaches Network Upgrades and needs the fork-readiness dashboard, build `backend/scripts/refresh_client_readiness.py` that scrapes each client repo's GitHub Releases for the activated fork tag |
+| `eip_authors` table (the EIP-author social graph) | Authors already stored as `text[]` on `public.eips`; a dedicated table only pays off when a UI feature actually needs the graph | Promote when an "ecosystem researcher map" page is on the roadmap |
+| `ethereum/pm` tracker auto-discovery | Pinned-issue + README parsing is fragile and ACD links move; per-baseline `source_pm_issue_url` curation is already correct and low-touch | Only worth automating if pm tracker URLs start churning weekly |
+| Testnet-activation ladder (Sepolia → Holesky → Hoodi → Mainnet) | Lives in `network_upgrades.attributes` as free-form JSON for now | Promote to a sibling `network_upgrade_activations` table the second time a cross-network-affected feature ships |
+| `beaconcha.in` epoch ⇄ date + Etherscan block ⇄ date enrichment | Currently curated in baseline | Wire `beaconcha.in/api/v1/epoch/{epoch}` + Etherscan `getblockbytime` once the worker also needs to compute activation dates from epoch/block (e.g. for pre-Merge forks pulled from `ethereum.org/history`) |
+| `composite_significance_score` (joint of `upgrade_risk_profile` × `impact_count` × `affected_subsectors_count`) | Computed view, not stored. Easy to add when the UI lands. | `CREATE VIEW upgrade_significance_view AS …` |
+
+**To re-enable (general recipe).**
+
+1. Decide which Tier-2/3 item is unblocking the next UI feature.
+2. If editorial (pre-Merge backfill, Glamsterdam scope): append `UpgradeBaseline` entries to the worker, run `--dry-run`, then trigger `workflow_dispatch`.
+3. If schema (`client_readiness`, `eip_authors`, `network_upgrade_activations`): write a fresh migration `supabase/migrations/2026???_XXXX_network_upgrades_<thing>.sql`, never edit `20260520_0006`. Update `backend/scripts/ingest_network_upgrades.py` to populate the new table.
+4. If auto-discovery (pm tracker): add a discovery function next to `list_consensus_fork_names`; surface results in the `RunSummary` for operator review before writing.
+
+---
+
 ## MEV & Block Builders — Tier-2 / Tier-3 fields + mevboost.pics / relayscan.io integration
 
 **Status.** Deferred. Tier-1 (16 rows ingested + enriched, 6 new orgs, both dual-enum splits applied, validator coverage curated baselines) shipped on 2026-05-20.

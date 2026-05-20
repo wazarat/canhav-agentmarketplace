@@ -1,0 +1,90 @@
+name: Network Upgrades ingest
+
+# M8.9 — weekly free ingestion of Ethereum Network Upgrades from GitHub.
+#
+# Pulls EIPs (ethereum/EIPs), consensus-spec fork directories
+# (ethereum/consensus-specs), execution-spec fork directories
+# (ethereum/execution-specs), and (optional) the upcoming-fork tracker issue
+# (ethereum/pm). Upserts into public.eips, public.network_upgrades,
+# public.upgrade_eips, public.upgrade_impact, and a mirror row into
+# public.projects with not_applicable_reason='protocol_event_not_entity'.
+#
+# Worker script: backend/scripts/ingest_network_upgrades.py
+# Schema:        supabase/migrations/20260520_0006_network_upgrades_schema.sql
+# Reference:     .cursor/skills/market-map/sectors/core-protocol-architecture/
+#                  subsectors/network-upgrades.{narrative,data-sources,fields-to-add}.md
+#
+# Required repo secrets:
+#   SUPABASE_URL                Supabase project URL (https://<ref>.supabase.co)
+#   SUPABASE_SERVICE_ROLE_KEY   Service-role JWT — write access to the 4 tables
+#
+# Optional repo secrets:
+#   INGEST_GITHUB_TOKEN         Fine-grained PAT with public_repo read scope.
+#                               Lifts the API limit from 60 → 5000 req/h. The
+#                               default GITHUB_TOKEN scoped to this repo also
+#                               works (Actions provides it) but consumes that
+#                               repo's quota; a dedicated PAT keeps the run
+#                               independent of Actions throttling.
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC. The Ethereum core-devs cadence is bi-weekly,
+    # so a Monday morning refresh catches the prior Thursday ACD scope edits.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    # Operator-driven re-run from the Actions tab.
+    inputs:
+      dry_run:
+        description: "Dry-run (do not write to Supabase)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    name: Pull GitHub → Supabase
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore GitHub ETag cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/github-etags.json
+          # Stable key so the cache is shared across runs; restore-keys fallback
+          # lets a fresh run still find a near-equivalent cache after the file
+          # rotates.
+          key: github-etags-network-upgrades-v1
+          restore-keys: |
+            github-etags-network-upgrades-
+
+      - name: Run weekly ingest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Prefer the dedicated PAT; fall back to the workflow GITHUB_TOKEN
+          # if the secret is not configured. Either way, the ingest script
+          # picks it up via os.environ['GITHUB_TOKEN'].
+          GITHUB_TOKEN: ${{ secrets.INGEST_GITHUB_TOKEN || github.token }}
+        run: |
+          ARGS=""
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            ARGS="--dry-run"
+            echo "Running in dry-run mode."
+          fi
+          python scripts/ingest_network_upgrades.py $ARGS

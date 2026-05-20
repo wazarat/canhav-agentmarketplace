@@ -9,3 +9,6 @@ jsonschema==4.23.0
 # Used by .cursor/skills/market-map/scripts/upload_logo.py to resize + WebP-encode
 # project logos before uploading to the Supabase Storage `project-logos` bucket.
 Pillow==11.3.0
+# Used by backend/scripts/ingest_network_upgrades.py to parse YAML front-matter on every
+# EIP markdown file pulled from github.com/ethereum/EIPs (M8.9 weekly worker).
+python-frontmatter==1.1.0
