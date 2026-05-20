@@ -9,6 +9,80 @@ Each entry should answer:
 
 ---
 
+## Organizations table — UI cutover + drop duplicated universal fields from `projects`
+
+**Status.** Deferred. The `public.organizations` table shipped on 2026-05-20 (migration `20260520_0003`) and is the new source of truth for org-level universal fields. The duplicated columns on `public.projects` (`founded_year`, `hq_country`, `team_size_range`, `twitter_handle`, `total_funding_usd`, `last_funding_round`, `last_funding_date`, `stage`) are still in place, and so is the legacy `sector_attributes.maintaining_organization` JSONB key. This is intentional — dropping them now would require simultaneously cutting the frontend over to read from the org row via a join.
+
+**What is parked.**
+- The org table itself is fully populated for the 18 orgs in flight across consensus-layer, execution-layer, and validators-staking-providers.
+- `public.projects.maintaining_organization` is a typed FK to `organizations.slug` and is set for every non-aggregate row.
+- The legacy `sector_attributes.maintaining_organization` free-text JSONB key still sits on rows ingested before M8.7. It is no longer the source of truth, but it's not actively misleading either — the typed column always agrees with or supersedes it.
+
+**To re-enable.**
+1. Update the Next.js frontend (`frontend/src/app/market-map/...`) to load org data via a join: `select p.*, o.* from projects p left join organizations o on o.slug = p.maintaining_organization`.
+2. Replace any UI code that reads `p.hq_country`, `p.founded_year`, etc. with `o.hq_country`, `o.founded_year`, etc. Same for `twitter_handle`, `total_funding_usd`, `last_funding_round`, `last_funding_date`, `stage`, `team_size_range`.
+3. Ship a migration `20260???_0001_drop_duplicated_universal_columns_on_projects.sql` that DROPs the now-redundant columns from `projects`. Include a sanity-check `select` in a transaction that verifies every project has either `maintaining_organization is not null` (FK works) or `is_aggregate = true` before the drop.
+4. Ship a follow-up `20260???_0002_drop_legacy_maintaining_organization_jsonb.sql` that strips the `sector_attributes->>'maintaining_organization'` key from every row.
+
+**Open question.** Some universal fields (especially `stage` for exchange validator-ops rows like `coinbase-validator-operations`) might want a *per-subsector* override even after the org row exists. E.g. Coinbase's parent stage is `public` but the staking-business-unit stage might want to be `n/a`. Decide whether subsector overrides live in `subsector_attributes` or as a per-row override column on `projects`.
+
+---
+
+## Validators & Staking Providers — Tier-2 and Tier-3 fields + rated.network integration
+
+**Status.** Deferred. Tier-1 (operator archetype, validator share %, dual-enum, ingest of all 4 archetypes including the aggregate handling) shipped on 2026-05-20.
+
+**Why deferred.** Tier-2 fields need operator transparency reports (`infra_provider_mix`, `geographic_distribution`, `dvt_adoption_status`, `ofac_filtering_policy`, `key_management_model` as enum, `soc2_status`, `insurance_coverage_usd`, `protocol_fee_pct`, `liquid_token_address`, `operator_count_in_set`, `permissionless`). Tier-3 needs a cron runner (`effective_apr_30d_pct`, `attestation_perf_30d_pct`, `missed_attestations_30d`, `slashing_events_lifetime`, `proposer_eff_30d_pct`, `withdrawal_queue_position`, `last_significant_incident`). Both require a wired `rated.network` API integration; the `validator_share_pct` we ship today is a curated baseline tagged `data_confidence='estimate'`.
+
+**What is parked.**
+
+Schema:
+- `.cursor/skills/market-map/schemas/subsectors/validators-staking-providers.json` is `additionalProperties: true`. Adding any field below later is a JSON-update on `public.subsectors.specific_field_schema` for `slug='validators-staking-providers'`; no Postgres column migration required.
+- Supabase mirror: `supabase/migrations/20260520_0004_validators_staking_providers_schema.sql` carries the v1 (Tier-1) shape. The next pass would be `20260???_0001_validators_tier2_schema.sql`.
+
+Convention rails (already in the schema):
+- `subsector_attributes.data_refreshed_at` / `data_confidence`.
+- `subsector_attributes.client_diversity_risk` × `client_diversity_role` (dual-enum) — already shipped.
+
+**Tier 2 — Add when manual curation allows.**
+
+| Field                          | Shape                                                      | Source                                                |
+| ------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------- |
+| `dvt_adoption_status`          | enum: `none | testnet | partial-mainnet | mainnet`         | Operator announcements                                |
+| `ofac_filtering_policy`        | enum: `filtering | non-filtering | selective | undisclosed` | Operator policy page                                  |
+| `geographic_distribution`      | array of `{country, pct}`                                  | Operator transparency reports                         |
+| `infra_provider_mix`           | array of `{provider, pct}`                                 | Operator transparency + monitoreth.io                 |
+| `key_management_model` (enum)  | `custodian-controlled | client-controlled | dvt-distributed | user-controlled | hsm-backed` | Self-disclosed                                        |
+| `soc2_status`                  | enum: `none | type-1 | type-2 | type-2-renewed`            | Operator disclosure                                   |
+| `insurance_coverage_usd`       | numeric                                                    | Operator disclosure                                   |
+| `protocol_fee_pct`             | numeric (LST only)                                         | Protocol docs                                         |
+| `liquid_token_address`         | string (Ethereum address, LST only)                        | Etherscan / DefiLlama                                 |
+| `operator_count_in_set`        | int (LST only)                                             | Protocol docs / on-chain                              |
+| `permissionless`               | boolean (LST only)                                         | Protocol docs                                         |
+| `composite_risk_score`         | computed 0–100                                             | Derived from all Tier-2 inputs                        |
+
+**Tier 3 — Operational telemetry (cron-driven).**
+
+| Field                          | Refresh        | Source                                                |
+| ------------------------------ | -------------- | ----------------------------------------------------- |
+| `validator_count`              | Weekly         | rated.network or beaconcha.in                         |
+| `effective_apr_30d_pct`        | Weekly         | rated.network                                         |
+| `attestation_perf_30d_pct`     | Weekly         | rated.network                                         |
+| `proposer_eff_30d_pct`         | Weekly         | rated.network                                         |
+| `missed_attestations_30d`      | Weekly         | beaconcha.in                                          |
+| `slashing_events_lifetime`     | Daily          | beaconcha.in/api/v1/slashings                         |
+| `withdrawal_queue_position`    | Daily          | beaconcha.in/api/v1/validator/queue                   |
+| `last_significant_incident`    | On publish     | Operator post-mortems                                 |
+
+**Lido 33% line.** Once `validator_share_pct` is wired to rated.network, surface Lido's share as a featured metric on the subsector landing page, recomputed weekly. This is the single most-watched number in the subsector.
+
+**To re-enable.**
+1. Wire rated.network: `https://api.rated.network/v0/eth/operators`. Map operator name → `projects.slug` (manual mapping table for the first cut).
+2. Promote `validator_share_pct` from `data_confidence='estimate'` to `verified` once Tier-1 telemetry lands.
+3. Author `enrich_validators_tier2.py` per the script-per-tier convention.
+
+---
+
 ## Execution Layer — Reth seeding + Tier-2 and Tier-3 fields
 
 **Status.** Deferred. Tier-1 (universal columns + `funding_model` + `client_diversity_role` + GitHub release/contributor signals + execution-share estimate) shipped on 2026-05-20.

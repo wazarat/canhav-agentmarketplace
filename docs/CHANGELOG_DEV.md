@@ -14,6 +14,69 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-20 15:05 — Validators & Staking Providers Tier-1 enrichment + `public.organizations` table (M8.7)
+
+**Why.** M8.7 = Validators & Staking Providers, the 11-row subsector spanning 4 archetypes (professional operators, exchange validator ops, LST protocol operator sets, the solo-validator aggregate). The subsector exposes the cross-cutting "same company, many subsector rows" problem head-on (Coinbase, Kraken, Binance will all re-appear in Exchanges/Custody/Wallets later), so this pass also ships the new `public.organizations` table as the single source of truth for org-level universal fields. Three Perplexity-drafted reference docs (`validators-staking-providers.{narrative,data-sources,fields-to-add}.md`) defined the entity scope, Tier-1 fields, dual-enum mapping, and per-archetype universal-field applicability.
+
+**What changed.**
+
+Cross-cutting schema (this is the big one):
+- `supabase/migrations/20260520_0003_organizations_table_and_backfill.sql` (new) — introduces `public.organizations(slug PK, display_name, legal_name, entity_type, website_url, twitter_handle, logo_url, hq_country, founded_year, team_size_range, total_funding_usd, last_funding_round, last_funding_date, stage, funding_model, status, acquired_by_slug FK, notes, attributes jsonb)`. RLS on, public-readable, writes via service role only. `tg__set_updated_at()` trigger. Adds `public.projects.maintaining_organization text references public.organizations(slug)` (typed FK, nullable for aggregates), `public.projects.is_aggregate boolean default false`, `public.projects.not_applicable_reason text`. Backfills the 8 distinct orgs already in flight (`ethereum-foundation`, `sigma-prime`, `chainsafe`, `status`, `offchain-labs`, `consensys`, `erigon`, `nethermind`) with curated universal data and rewrites the 12 existing projects' `maintaining_organization` to point at the right org slugs. `Prysmatic Labs → offchain-labs` (acquired Jan 2022); `Erigon Community → erigon` (legal entity Erigon Technologies AG). Applied via the Supabase MCP.
+
+Validators subsector schema (additive, JSONB-only so far):
+- `supabase/migrations/20260520_0004_validators_staking_providers_schema.sql` (new) — replaces the placeholder `specific_field_schema` for `slug='validators-staking-providers'` with the Tier-1 shape: `operator_archetype`, `operational_role`, `validator_operation_model`, `key_management_model`, `infrastructure_control`, `consensus_client_mix`, `execution_client_mix`, `client_diversity_risk`, `client_diversity_role`, `client_diversity_risk_note`, `estimated_validator_share_band`, `validator_share_pct`, `validator_count`, `concentration_risk`, `censorship_sensitivity`, `governance_influence_vector`, `data_refreshed_at`, `data_confidence`. Applied via the Supabase MCP.
+
+Local schemas + skill (gitignored under `.cursor/`):
+- `.cursor/skills/market-map/schemas/subsectors/validators-staking-providers.json` — real definitions replacing the placeholder. `additionalProperties: true` so Tier-2/3 fields (ofac_filtering_policy, dvt_adoption_status, geographic_distribution, infra_provider_mix, soc2_status, protocol_fee_pct, liquid_token_address, operator_count_in_set, permissionless) can land via JSONB-only future passes.
+- `.cursor/skills/market-map/schemas/subsectors/validators-staking-providers.column_map.json` — covers all 18 sheet headers including the misspellings (`Practioners Note`, `Practioner Validation Check ` trailing space). Five `*_raw` keys at ingest get normalized to enum keys by the enrichment script. Four underscore-prefixed meta notes document (a) no `Maintaining Organization` column on this sheet, (b) the dual-enum split, (c) the `*_raw` → enum normalization, (d) the aggregate handling.
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/validators-staking-providers.md` — rewritten from the v1 stub into a real implementation reference. Lists every entity + org slug, documents the 4 archetypes, embeds the 9-row dual-enum mapping table (Validators introduces 3 operator-only roles: `heterogeneity-anchor`, `scale-correlated-active`, `scale-and-monoculture`), points at the enrichment script, calls out the cross-subsector ripple (which future subsectors share which org slugs).
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/validators-staking-providers.{narrative,data-sources,fields-to-add}.md` (new, mirrored from the Perplexity v5 drafts) — public-site narrative copy, authoritative sourcing guide, universal-field applicability matrix.
+
+Ingest:
+- `python .cursor/skills/market-map/scripts/ingest_subsector.py --slug validators-staking-providers` — 11/11 rows upserted into `projects`. Found and fixed a PostgREST 400 ("All object keys must match" on bulk upsert) by harmonizing the key set across the batch in `scripts/upsert_projects.py` (`_harmonize_keys` helper now runs before each POST).
+
+Enrichment script (new):
+- `.cursor/skills/market-map/scripts/enrich_validators_staking_providers.py` — first script to use the new orgs table. For each of the 11 baselines: (a) upsert the `maintaining_organization` row via `POST /rest/v1/organizations?on_conflict=slug` with `Prefer: resolution=merge-duplicates`, (b) PATCH the project row's `maintaining_organization` FK, `is_aggregate`, `not_applicable_reason`, and merge `subsector_attributes`. Normalizes `*_raw` ingest keys (`client_diversity_risk_note_type_raw`, `estimated_validator_share_band_raw`, `concentration_risk_raw`, `censorship_sensitivity_raw`, `governance_influence_vector_raw`) into proper enum keys via 4 mapping tables. Derives `client_diversity_risk` + `client_diversity_role` deterministically from the verbatim sheet phrase via `DIVERSITY_MAP` (9 source phrases, 2 enums each). Applies curated `validator_share_pct` baselines (Lido 29%, Coinbase 14%, Solo Validators 12%, Binance 6%, …). Solo Validators is skipped from per-entity enrichment (no GitHub, no Crunchbase, no LinkedIn) and gets `is_aggregate=true, maintaining_organization=null, not_applicable_reason='aggregate_category'`. Idempotent. Supports `--dry-run`.
+
+Curated org rows created by enrichment (10 new orgs joining the 8 backfilled orgs):
+- Professional: `figment` (Canada, 2018, $160M, series-c, venture); `chorus-one` (Switzerland, 2018, $33M, series-a); `p2p-org` (UAE, 2018, community/bootstrapped); `blockdaemon` (US, 2017, $394M, series-c).
+- Exchange parents: `coinbase` (US, 2012, $547M pre-IPO, public NASDAQ:COIN); `kraken` (US, 2011, $121M, series-b, post-SEC-settlement); `binance` (Cayman, 2017, distributed/private).
+- DAOs: `lido-dao` (entity_type=dao, LDO Dec 2020); `rocket-pool-dao` (entity_type=dao, RPL Nov 2021); `stakewise-dao` (entity_type=dao, SWISE March 2021).
+
+Curated subsector telemetry applied (live, all 11 rows):
+- Operator archetype + validator share %: figment=3.0%, chorus-one=1.5%, p2p-org=4.0%, blockdaemon=4.0%, coinbase=14.0%, kraken=4.0%, binance=6.0%, lido=29.0%, rocket-pool=2.5%, stakewise=0.5%, solo=12.0%. All `data_confidence='estimate'` until rated.network is wired.
+- Dual-enum mapping fully applied. Notable: Binance → `high` / `scale-and-monoculture`; Lido → `medium` / `scale-correlated-active`; Solo Validators → `low` / `heterogeneity-anchor`; Coinbase → `medium-high` / `scale-and-concentration`.
+- All `*_raw` ingest keys converted to enum keys (`estimated_validator_share_band`, `concentration_risk`, `censorship_sensitivity`, `governance_influence_vector`).
+
+Aggregate row handled correctly:
+- `solo-validators` row: `is_aggregate=true`, `maintaining_organization=null`, `not_applicable_reason='aggregate_category'`. Slug deliberately stayed `solo-validators` (default slugify from sheet name "Solo Validators") rather than the doc-recommended `solo-stakers-aggregate`; the `is_aggregate=true` flag is the canonical signal for downstream consumers. Note logged in the skill .md.
+
+Backfill of existing 12 projects (consensus-layer + execution-layer):
+- All 12 now have `maintaining_organization` pointing at one of the 8 backfilled org rows. `ethereum-foundation` is shared by 4 projects (consensus specs, execution EIPs, Geth, Yellow Paper); `consensys` is shared by 2 (Teku, Besu); the rest are 1:1.
+
+Documentation (skills + repo docs):
+- `docs/DECISIONS.md` — new top entry documenting the `public.organizations` table introduction, the typed `maintaining_organization` FK, and the ingest rule (upsert-by-slug, don't overwrite). Three alternatives explicitly rejected (string-only, parent_company without table, rip-bandaid drop-old-columns).
+- `docs/CHANGELOG_DEV.md` — this entry.
+- `docs/FUTURE_PLANS.md` — three new entries: (a) clean up `sector_attributes.maintaining_organization` JSONB key after UI cutover; (b) Validators Tier-2/3 fields with concrete schema deltas; (c) drop duplicated universal fields from `projects` once UI joins through `organizations`.
+
+**Files.**
+- `supabase/migrations/20260520_0003_organizations_table_and_backfill.sql` (new)
+- `supabase/migrations/20260520_0004_validators_staking_providers_schema.sql` (new)
+- `.cursor/skills/market-map/schemas/subsectors/validators-staking-providers.json`
+- `.cursor/skills/market-map/schemas/subsectors/validators-staking-providers.column_map.json`
+- `.cursor/skills/market-map/scripts/enrich_validators_staking_providers.py` (new)
+- `.cursor/skills/market-map/scripts/upsert_projects.py` (harmonize-keys fix for PostgREST bulk upsert)
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/validators-staking-providers.{md,narrative.md,data-sources.md,fields-to-add.md}`
+- `docs/DECISIONS.md`, `docs/CHANGELOG_DEV.md`, `docs/FUTURE_PLANS.md`
+
+**Verified.**
+- Supabase MCP: `select count(*) from public.organizations` → 18 (8 backfilled + 10 new validator-org-related).
+- Supabase MCP: `select * from public.projects where subsector_slug='validators-staking-providers'` → 11 rows, all with correct `maintaining_organization` FK or `is_aggregate=true`.
+- Cross-join sanity: `select p.slug, o.display_name from projects p join organizations o on o.slug=p.maintaining_organization` returns sensible owner names for all 22 non-aggregate rows.
+- Idempotency: re-running `enrich_validators_staking_providers.py` with no input changes produces zero data drift (org upserts merge, project PATCHes merge `subsector_attributes`).
+
+**Follow-ups.** Wire rated.network for `validator_share_pct` (still curated estimates). Tier-2 fields (ofac_filtering_policy, dvt_adoption_status, geographic_distribution, infra_provider_mix, soc2_status, protocol_fee_pct, liquid_token_address) parked in FUTURE_PLANS. UI cutover from `sector_attributes.maintaining_organization` → typed FK still pending. Drop duplicated universal fields from `projects` once UI joins through `organizations`.
+
 ## 2026-05-20 14:20 — Execution Layer Tier-1 enrichment (M8.6 ingest + universal columns + dual-enum + GitHub telemetry + funding_model)
 
 **Why.** M8.6 = Execution Layer. The 6 source rows (Geth / Nethermind / Besu / Erigon + Yellow Paper + Execution EIPs) had no projects rows in Supabase yet, and the subsector's `specific_field_schema` was a `{}` placeholder. Three Perplexity-drafted reference docs (`execution-layer.{narrative,data-sources,fields-to-add}.md`) defined (a) where each missing field should come from, (b) a new `funding_model` enum capturing the four-way split between the clients' funding mechanics, and (c) the dual-enum (`client_diversity_risk` × `client_diversity_role`) carried over from Consensus Layer. This pass implements all of the Tier-1 work in one shot and leaves the two spec rows untouched (same convention as `ethereum-consensus-specifications` from M8.5).

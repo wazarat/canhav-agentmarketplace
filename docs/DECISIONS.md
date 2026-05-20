@@ -6,6 +6,34 @@
 
 ---
 
+## 2026-05-20 — Introduce `public.organizations` table; `maintaining_organization` becomes a typed FK on `public.projects`
+
+**Context.** The market map has a structural problem the first two subsectors masked but the Validators subsector exposes head-on: the same real-world company appears in many subsector rows. Coinbase shows up in Validators (as `Coinbase (Validator Operations)`) and will later show up in Custody, Exchanges, On/Off-Ramps, and Wallets. Today, each of those would be a duplicated row with its own copy of `hq_country`, `founded_year`, `total_funding_usd`, `twitter_handle` — guaranteed to drift out of sync. Same problem for Consensys (Teku + Besu today, MetaMask + Infura + Linea tomorrow) and the Ethereum Foundation (Geth + Yellow Paper + Execution EIPs + Consensus Specs today, plus future ecosystem programs).
+
+The Perplexity-drafted `validators-staking-providers.fields-to-add.md` proposes the fix: every subsector row carries a `maintaining_organization` slug that FKs into a single `organizations` table. That table holds the shared universal fields **once**; subsector rows hold only the attributes that are specific to what that org does in that subsector.
+
+**Decision.** Ship the cross-cutting `public.organizations` table now, at the start of M8.7, instead of bolting it on later. Migration `supabase/migrations/20260520_0003_organizations_table_and_backfill.sql` introduces:
+
+- `public.organizations(slug PK, display_name, legal_name, entity_type, website_url, twitter_handle, logo_url, hq_country, founded_year, team_size_range, total_funding_usd, last_funding_round, last_funding_date, stage, funding_model, status, acquired_by_slug, notes, attributes jsonb)`. `entity_type` enum: `company | dao | foundation | aggregate | individual`. RLS on, public-readable, writes via service role only. `updated_at` trigger via shared `public.tg__set_updated_at()`.
+- `public.projects.maintaining_organization text references public.organizations(slug) deferrable initially deferred` — typed FK column. Nullable for aggregates.
+- `public.projects.is_aggregate boolean default false` and `public.projects.not_applicable_reason text` for explicit handling of category rows (Solo Validators today; "Other rollups", "Other DAOs" tomorrow). `not_applicable_reason` enum: `aggregate_category | dao_governed | protocol_specification | distributed_collective`.
+- Inline backfill for the 8 distinct orgs already in flight (`ethereum-foundation`, `sigma-prime`, `chainsafe`, `status`, `offchain-labs`, `consensys`, `erigon`, `nethermind`) with curated universal data. Prysmatic Labs → `offchain-labs` (acquired Jan 2022); Erigon Community → `erigon` (legal entity Erigon Technologies AG).
+
+**Ingest rule (codified in `enrich_validators_staking_providers.py`, will be replicated across all future enrichment scripts).** When ingesting any subsector row: (1) look up `organizations[slug]` first; (2) if it doesn't exist, create it from the row's universal fields; (3) if it does exist, **do not overwrite** — only attach the new subsector row. The orgs table is upsert-by-slug; subsector tables are insert-only relative to it. DAOs (Lido DAO, Rocket Pool DAO, StakeWise DAO) get their own org rows with `entity_type='dao'` so financial fields can be null without breaking validation. Aggregates set `is_aggregate=true, maintaining_organization=null, not_applicable_reason='aggregate_category'`.
+
+**Consequences.**
+- Cross-subsector "everything this org does" queries become a single join: `select * from projects where maintaining_organization='coinbase'` will, after Custody and Exchanges land, return every Coinbase row across the map. This is the long-term payoff.
+- The legacy `sector_attributes.maintaining_organization` JSONB key is intentionally **left in place** on existing rows for back-compat — the typed FK column is the new source of truth, but cleaning up the JSONB key happens in a separate UI-cutover migration. No data is lost.
+- For exchange validator-ops rows, the FK points at the **parent exchange** (`coinbase`, `kraken`, `binance`), not at a synthetic "Coinbase Validator Operations" org. The parenthetical disambiguation lives in `projects.name`; the slug carries `-validator-operations` suffix; the org FK is the parent.
+- Universal-field duplication on `projects` (founded_year, hq_country, etc.) is *not* removed in this migration. That's a UI-coupled cleanup left for a future pass; the org row is now the canonical write target for new data.
+
+**Alternatives considered.**
+- *Keep `maintaining_organization` as a free-text string in JSONB indefinitely.* Rejected — every subsector that ingests after Validators makes the duplication worse.
+- *Add a `parent_company` slug as the typed column without a backing `organizations` table.* Rejected — solves the FK but not the data-once-not-many problem, and forces the same migration later anyway.
+- *Backfill universal fields in a single rip-the-bandaid migration that also drops `projects.{founded_year,hq_country,...}` columns.* Rejected — too coupled to the UI; ship the table first, cut the UI over later.
+
+---
+
 ## 2026-05-20 — `funding_model` enum lives in `subsector_attributes` first, promote to typed column when a second subsector needs it
 
 **Context.** The Execution Layer source sheet does not encode *how* each entity is funded. The four production clients have fundamentally different funding mechanics: Geth is EF-internal headcount with no discrete raise; Nethermind raised a ~$8M Series A in 2022; Besu is funded inside Consensys; Erigon runs on EF + Optimism grants plus services revenue. The Perplexity-drafted `execution-layer.fields-to-add.md` proposes a `funding_model` enum to make this legible: `venture | foundation-internal | corporate-internal | grants-plus-services | dao | community | n/a`.
