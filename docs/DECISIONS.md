@@ -6,6 +6,47 @@
 
 ---
 
+## 2026-05-20 — `client_diversity_risk` and `client_diversity_role` are a dual-enum, not a single field
+
+**Context.** The source Google Sheet stores Ethereum client diversity in one cell shaped like `"Historically Dominant (Elevated Correlated Failure Risk)"`. The v1 ingest split this on the first `(` into `client_diversity_risk` (enum head) and `client_diversity_risk_note` (free text). That worked for v1 but conflated two *different* dimensions: severity (how big is the concentration risk?) and role (what kind of contributor is this entity to client diversity?). A single field cannot answer both.
+
+Concrete: Lighthouse is in the "Balanced Share (Positive for Client Diversity)" bucket. Severity is low-to-medium. Role is "balanced-contributor". Teku, Nimbus, and Lodestar all share `minority-positive` severity but play three different roles (`strategic-minority`, `decentralization-critical`, `research-language-diversity`). Collapsing role into the severity field destroys this signal.
+
+The external sourcing guide at `~/wazarat/consensuslayer/consensus-layer.data-sources.md` recommends a dual-enum explicitly, with a fixed mapping table from the source phrase to (severity, role).
+
+**Decision.** Treat `client_diversity_risk` (severity grade) and `client_diversity_role` (qualitative role) as two independent enum fields inside `subsector_attributes`. Both live in JSONB — `additionalProperties: true` — so we did not need a typed-column migration. The role is **derived** from `client_diversity_risk_note` at enrichment time per the fixed table in `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/consensus-layer.md`. The role is not pulled from the sheet because the sheet does not separate it.
+
+**Consequences.**
+- UI must render the chip from `client_diversity_risk` and the secondary line from `client_diversity_role`. Never re-merge.
+- Both fields update together. The enrichment script and any future sheet-row edits must keep them consistent.
+- When new clients arrive, the curator picks the source phrase and the script applies both halves deterministically — no per-row judgment required.
+- Lighthouse's severity was corrected from `medium` → `low-medium` on 2026-05-20 (the doc's mapping table places "Balanced Share" at `low-medium`, not `medium`).
+
+**Alternatives considered.**
+- *Keep one field, encode role in the `_note`.* Rejected — defeats the purpose; you cannot sort or filter on role.
+- *Promote both to typed columns now.* Rejected — JSONB keeps cross-subsector schema evolution cheap. Promote only when at least two subsectors share the same field.
+- *Drop the severity field, keep only role.* Rejected — severity is the more chart-friendly axis. Both have independent value.
+
+---
+
+## 2026-05-20 — `clientdiversity.org/api` does not exist; validator share is a curated estimate until a working live source is wired up
+
+**Context.** Both `~/wazarat/consensuslayer/consensus-layer.data-sources.md` and the in-skill subsector reference name `clientdiversity.org/api` as the primary source for `validator_share_pct`. In practice both `/api` and `/api/v1` return 404 HTML (verified 2026-05-20). The site only renders an HTML dashboard; there is no documented JSON endpoint. Alternatives discussed in the doc — `rated.network` — require authenticated API access.
+
+**Decision.** Populate `validator_share_pct` from a hand-curated baseline embedded in `.cursor/skills/market-map/scripts/enrich_consensus_layer.py` (BASELINES), and stamp every row written by that script with `data_confidence='estimate'` + `data_refreshed_at=<utc-now>`. UI consumers can use the confidence band to decide whether to render the value with a "(est.)" suffix or hide it on strict views. When a working live source comes online, the script's per-baseline `validator_share_pct` field will be replaced with the API call and `data_confidence` will flip to `verified`.
+
+**Consequences.**
+- The single field still moves in step with reality (we update the baseline whenever we refresh).
+- Downstream code can trust `data_confidence` as a freshness band — no need to inspect URLs or hostnames.
+- The same pattern (estimate → verified) is reusable for any other field where the documented live source turns out to be unreachable or gated. Set the baseline, flag as estimate, surface the timestamp.
+
+**Alternatives considered.**
+- *Scrape the clientdiversity.org HTML dashboard.* Reserved for a follow-up; scraping is fragile and the page is JS-rendered. If it becomes the only path, we will add a dedicated `scripts/refresh_validator_share.py` instead of inlining HTML parsing into the enrichment script.
+- *Use rated.network with a paid API key.* Out of scope for a pre-revenue product. Revisit post-launch.
+- *Leave `validator_share_pct` null.* Rejected — the value is genuinely informative even at ±3pp accuracy, and the dual-enum (`risk` + `role`) is not a substitute for the percentage.
+
+---
+
 ## 2026-05-15 — Frontend on Vercel, backend on Render (NOT both on Vercel)
 
 **Context.** The Python backend could in theory run on Vercel as a serverless function. Vercel even auto-detects the monorepo and offers a multi-service deploy (which is what triggered the "vercel.json required to deploy projects with multiple services" error during M5).

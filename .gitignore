@@ -1,3 +1,6 @@
+# Cursor IDE — agent skills, plans, settings (kept local, not pushed)
+.cursor/
+
 # Dependencies
 node_modules/
 .pnp

@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://canhav.com/schemas/market-map/subsectors/institutional-payment-rails.json",
-  "title": "Institutional Payment Rails — subsector_attributes",
-  "type": "object",
-  "additionalProperties": true,
-  "properties": {}
-}

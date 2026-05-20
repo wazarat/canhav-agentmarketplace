@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://canhav.com/schemas/market-map/sectors/rollup-scaling-frameworks.json",
-  "title": "Rollup & Scaling Frameworks — sector_attributes",
-  "type": "object",
-  "additionalProperties": true,
-  "properties": {}
-}

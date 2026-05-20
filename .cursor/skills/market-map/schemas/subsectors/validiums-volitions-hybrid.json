@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://canhav.com/schemas/market-map/subsectors/validiums-volitions-hybrid.json",
-  "title": "Validiums, Volitions & Hybrid Rollups — subsector_attributes",
-  "type": "object",
-  "additionalProperties": true,
-  "properties": {}
-}

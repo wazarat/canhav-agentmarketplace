@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://canhav.com/schemas/market-map/subsectors/oracles-data-networks.json",
-  "title": "Oracles & Data Networks — subsector_attributes",
-  "type": "object",
-  "additionalProperties": true,
-  "properties": {}
-}

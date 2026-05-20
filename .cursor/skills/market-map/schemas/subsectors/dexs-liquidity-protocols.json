@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://canhav.com/schemas/market-map/subsectors/dexs-liquidity-protocols.json",
-  "title": "DEXs & Liquidity Protocols — subsector_attributes",
-  "type": "object",
-  "additionalProperties": true,
-  "properties": {}
-}

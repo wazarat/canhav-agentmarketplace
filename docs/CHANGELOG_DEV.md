@@ -14,6 +14,66 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-20 13:50 — Consensus Layer Tier-1 enrichment (universal columns + dual-enum + GitHub telemetry)
+
+**Why.** The 5 Consensus Layer client rows landed in M8.5 with every universal column (`status`, `founded_year`, `hq_country`, `team_size_range`, `twitter_handle`, funding triplet) at `null` — the source sheet only filled the subsector-shaped columns. The user provided two new docs (`~/wazarat/consensuslayer/consensus-layer.{data-sources,fields-to-add}.md`) defining (a) where each missing field should come from and (b) a "dual-enum" partner field (`client_diversity_role`) plus Tier-1 telemetry from GitHub. This pass implements all of it for the five clients while leaving `ethereum-consensus-specifications` untouched (the spec is shaped differently and is curated separately per the user's explicit instruction).
+
+**What changed.**
+
+Schema (`additionalProperties: true`, so still no Postgres column churn):
+- `supabase/migrations/20260520_0001_consensus_layer_enrichment_schema.sql` (new) — updates `public.subsectors.specific_field_schema` for `slug='consensus-layer'` to add `client_diversity_role`, `validator_share_pct`, `latest_release_tag`, `latest_release_date`, `contributors_last_90d`, `data_refreshed_at`, `data_confidence`. Applied via the Supabase MCP.
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.json` — local mirror of the above. Hand-edited descriptions to be richer than the migration's inline ones (they share the same shape).
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.column_map.json` — added two underscore-prefixed meta notes documenting (a) that `client_diversity_role` is derived not sourced from the sheet, and (b) that the Tier-1 telemetry keys are enrichment-only.
+
+Enrichment script (new):
+- `.cursor/skills/market-map/scripts/enrich_consensus_layer.py` — one-shot enricher with a `BASELINES` registry of the 5 clients. For each, calls the GitHub REST API for `founded_year` (repo `created_at`), `latest_release_tag` + `latest_release_date` (`/releases/latest`), and `contributors_last_90d` (distinct commit authors over the last 90 days). Applies curated baselines for `hq_country`, `team_size_range`, `twitter_handle`, `total_funding_usd`, `last_funding_round`, `last_funding_date`, `validator_share_pct`, `client_diversity_role`. Server-side merges `subsector_attributes` so the v1 ingest keys (`client_implementation`, `role_in_consensus`, `client_diversity_risk_note`, …) survive. Stamps `data_refreshed_at` + `data_confidence='estimate'`. Idempotent. Supports `--dry-run` and `--skip-github`. Skips the spec row by construction (the spec is not in `BASELINES`).
+
+Curated data applied (live):
+- Prysm — Offchain Labs / United States / 20-50 / `@prysmaticlabs` / $2M (Prysmatic seed pre-Offchain) / `acquired` 2022-01-01 / 33% share / `dominant-incumbent`.
+- Lighthouse — Sigma Prime / Australia / 5-20 / `@sigp_io` / null funding / `ecosystem-grant` / 33% share / `balanced-contributor`. **Corrected severity from `medium` → `low-medium`** per the doc's enum mapping table.
+- Teku — Consensys / United States / 5-20 / `@ConsenSys` / null funding (internal Consensys, not isolable) / 21% share / `strategic-minority`.
+- Nimbus — Status / Switzerland / 5-20 / `@ethnimbus` / null funding / `ecosystem-grant` / 5% share / `decentralization-critical`.
+- Lodestar — ChainSafe / Canada / 5-20 / `@lodestar_eth` / null funding / `ecosystem-grant` / 3% share / `research-language-diversity`.
+
+GitHub-derived (live, from the actual repos at the time of this commit):
+- Prysm — founded 2018, `v7.1.3` 2026-03-18, 17 contributors / 90d.
+- Lighthouse — founded 2018, `v8.1.3` 2026-03-26, 7 contributors / 90d.
+- Teku — founded 2018, `26.4.0` 2026-03-31, 16 contributors / 90d.
+- Nimbus — founded 2018, `v26.5.0` 2026-05-11, 18 contributors / 90d.
+- Lodestar — founded 2018, `v1.43.0` 2026-05-20, 16 contributors / 90d.
+
+Two doc deltas the implementation forced (also captured in `docs/DECISIONS.md` 2026-05-20):
+1. **`clientdiversity.org/api` does not exist.** Both `/api` and `/api/v1` return 404 HTML. `validator_share_pct` is therefore a curated baseline tagged `data_confidence='estimate'` until a working live source is wired up. Candidates to evaluate are listed in `docs/FUTURE_PLANS.md`.
+2. **`stage` stays `null` for OSS clients** instead of being set to a literal `'n/a'` string. The doc's applicability matrix marks `stage` as not-applicable, and the doc's own rule is "never force a value into a `n/a` field." Null is the cleanest representation; a `not_applicable_reason` field is parked in FUTURE_PLANS until we have a real consumer for it.
+
+Documentation (skills + repo docs):
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/consensus-layer.md` — rewritten from the v1 stub into a real reference. Lists every entity with its diversity role, documents the v1 + v2 field set, embeds the dual-enum mapping table, points at the enrichment script, and calls out the open `validator_share_pct` source question.
+- `docs/DECISIONS.md` — two new entries on top: the dual-enum rationale, and the curated-estimate fallback for validator share.
+- `docs/FUTURE_PLANS.md` — new entry "Consensus Layer — Tier-2 and Tier-3 fields" above the existing logos entry. Lists the deferred Tier-2 manual-curation fields (audit history, supported features, hardware reqs, governance model, EF funding dependency, incident history) and Tier-3 cron-driven telemetry (open critical issues, slashing attribution, attestation perf, uptime). Includes a clear "to re-enable" recipe and the open question on the live validator-share source.
+
+**Files.**
+- `supabase/migrations/20260520_0001_consensus_layer_enrichment_schema.sql` (new)
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.json`
+- `.cursor/skills/market-map/schemas/subsectors/consensus-layer.column_map.json`
+- `.cursor/skills/market-map/scripts/enrich_consensus_layer.py` (new)
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/consensus-layer.md`
+- `docs/DECISIONS.md`
+- `docs/FUTURE_PLANS.md`
+- `docs/CHANGELOG_DEV.md`
+
+**Verified.**
+- Migration applied via Supabase MCP. Re-read `public.subsectors.specific_field_schema` for `slug='consensus-layer'` and confirmed all 14 keys present.
+- Enrichment script: dry-run on all 5 clients, then live run — all 5 PATCHed cleanly with `✓ patched`.
+- Post-run SQL audit: every Lighthouse / Lodestar / Nimbus / Prysm / Teku row carries `status='live'`, a `founded_year`, an `hq_country`, `client_diversity_role`, `validator_share_pct`, a release tag + date, `contributors_last_90d`, `data_confidence='estimate'`, and `data_refreshed_at='2026-05-20T13:43:42+00:00'`. The `ethereum-consensus-specifications` row is **untouched** — every universal field still `null` and no new subsector keys.
+- `frontend` build clean; UI auto-renders new keys via the schema-driven `ProjectTable` from M8.5 (no frontend code change required).
+
+**Follow-ups.**
+- Wire a working `validator_share_pct` source (see candidates in `docs/FUTURE_PLANS.md`); once verified, flip `data_confidence` to `verified`.
+- Add Tier-2 / Tier-3 keys to `BASELINES` + the JSON schema in a follow-up pass when manual curation is funded. Recipe in `FUTURE_PLANS.md`.
+- M8.6 continues with **Execution Layer** as the next subsector. The dual-enum convention from this pass will not apply (execution-layer client diversity is its own debate), but the universal-column enrichment pattern (GitHub-derived founded_year/releases/contributors + curated org metadata) is directly reusable. Plan to generalize `enrich_consensus_layer.py` into `enrich_clients.py` once we have a second subsector of the same shape.
+
+---
+
 ---
 
 ## 2026-05-20 09:10 — Defer logo display in the Market Map UI
