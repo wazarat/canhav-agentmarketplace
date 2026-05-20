@@ -5,9 +5,10 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ["lucide-react", "framer-motion"],
   },
-  // Project logos live in the Supabase Storage public bucket. ProjectLogo uses
-  // `unoptimized` so we don't actually hit the Next image optimizer, but listing
-  // the host here keeps the door open for future srcset / responsive variants.
+  // Intentionally retained for docs/FUTURE_PLANS.md — "Project logos in the Market Map UI".
+  // The UI render path was reverted, but Supabase Storage still hosts the 6 Consensus Layer
+  // logos and the column / bucket / scripts are dormant. When logos are re-enabled this
+  // host whitelist is already in place — no config churn at unpark time.
   images: {
     remotePatterns: [
       {

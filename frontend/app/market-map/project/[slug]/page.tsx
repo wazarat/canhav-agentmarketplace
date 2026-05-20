@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/market-map/Breadcrumbs";
-import { ProjectLogo } from "@/components/market-map/ProjectLogo";
 import { getProject, MarketMapError, type ProjectDetail } from "@/lib/market-map";
 
 // Fields whose values are semicolon- or newline-separated lists in the source sheet.
@@ -166,36 +165,31 @@ export default async function ProjectPage({ params }: PageProps) {
           </div>
         )}
 
-        <div className="mt-4 flex flex-wrap items-start gap-5">
-          <ProjectLogo project={project} size="lg" />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-baseline gap-4">
-              <h1
-                className={`font-display text-4xl font-semibold tracking-tight sm:text-5xl ${
-                  canonical
-                    ? "bg-gradient-to-r from-amber-200 via-ink-50 to-amber-200 bg-clip-text text-transparent"
-                    : "text-ink-50"
-                }`}
-              >
-                {project.name}
-              </h1>
-              {project.status && (
-                <span className="rounded-full border border-ink-700/80 bg-ink-900/50 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-100">
-                  {project.status}
-                </span>
-              )}
-            </div>
-            {(() => {
-              const sa = (project.sector_attributes ?? {}) as Record<string, unknown>;
-              const org = typeof sa.maintaining_organization === "string" ? sa.maintaining_organization : null;
-              return org ? (
-                <p className="mt-1 text-sm text-ink-300">
-                  Maintained by <span className="text-ink-100">{org}</span>
-                </p>
-              ) : null;
-            })()}
-          </div>
+        <div className="mt-4 flex flex-wrap items-baseline gap-4">
+          <h1
+            className={`font-display text-4xl font-semibold tracking-tight sm:text-5xl ${
+              canonical
+                ? "bg-gradient-to-r from-amber-200 via-ink-50 to-amber-200 bg-clip-text text-transparent"
+                : "text-ink-50"
+            }`}
+          >
+            {project.name}
+          </h1>
+          {project.status && (
+            <span className="rounded-full border border-ink-700/80 bg-ink-900/50 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-100">
+              {project.status}
+            </span>
+          )}
         </div>
+        {(() => {
+          const sa = (project.sector_attributes ?? {}) as Record<string, unknown>;
+          const org = typeof sa.maintaining_organization === "string" ? sa.maintaining_organization : null;
+          return org ? (
+            <p className="mt-2 text-sm text-ink-300">
+              Maintained by <span className="text-ink-100">{org}</span>
+            </p>
+          ) : null;
+        })()}
 
         {project.description && (
           <p className="mt-4 max-w-2xl text-ink-100/85">{project.description}</p>

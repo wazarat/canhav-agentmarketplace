@@ -1,6 +1,6 @@
 # AI Context — canhav-agentmarketplace
 
-> **Read this file first.** It is the persistent memory for any AI agent working in this repo. Pair it with [`DECISIONS.md`](./DECISIONS.md) for the *why* and [`CHANGELOG_DEV.md`](./CHANGELOG_DEV.md) for the *what just happened*.
+> **Read this file first.** It is the persistent memory for any AI agent working in this repo. Pair it with [`DECISIONS.md`](./DECISIONS.md) for the *why*, [`CHANGELOG_DEV.md`](./CHANGELOG_DEV.md) for the *what just happened*, and [`FUTURE_PLANS.md`](./FUTURE_PLANS.md) for the *what we deliberately parked*.
 >
 > **After making changes, update [`CHANGELOG_DEV.md`](./CHANGELOG_DEV.md).** Always.
 
@@ -83,7 +83,8 @@ canhav-agentmarketplace/
 ├── docs/                    # ← you are here. Persistent agent memory.
 │   ├── AI_CONTEXT.md
 │   ├── DECISIONS.md
-│   └── CHANGELOG_DEV.md
+│   ├── CHANGELOG_DEV.md
+│   └── FUTURE_PLANS.md      # Deferred / post-milestone polish parking lot.
 ├── DEPLOYMENT.md            # Step-by-step Render + Vercel runbook
 ├── README.md                # Public-facing project README + milestone status
 ├── LICENSE                  # MIT
@@ -227,7 +228,8 @@ All commits must be authored by `wazarat <wazarat@outlook.com>` (the user's acco
 1. Read this file (you're here). Re-read sections 4 (stack), 5 (design system), and 8 (milestone protocol).
 2. Read [`DECISIONS.md`](./DECISIONS.md) — never re-litigate a decision listed there without explicit user approval.
 3. Skim the latest entries in [`CHANGELOG_DEV.md`](./CHANGELOG_DEV.md) so you know what was last touched and why.
-4. Then plan your change. If it conflicts with a decision, **ask** before deviating.
+4. If your change touches an area that might overlap with parked work, check [`FUTURE_PLANS.md`](./FUTURE_PLANS.md) before ripping anything out — entries there list rails (DB columns, scripts, storage objects, config) that look orphaned but are intentionally retained.
+5. Then plan your change. If it conflicts with a decision, **ask** before deviating.
 
 ## 11. What to do after you make changes
 

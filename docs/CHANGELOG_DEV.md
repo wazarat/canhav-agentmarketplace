@@ -16,6 +16,52 @@
 
 ---
 
+## 2026-05-20 09:10 — Defer logo display in the Market Map UI
+
+**Why.** Visible logos in the table, canonical card, and project detail were drawing attention before the Market Map has enough breadth (1 of 36 subsectors live) to earn it. The pipeline shipped a day earlier was sound; pulling the render layer keeps the canvas clean during the M8.5–M8.11 ingest loop and lets us re-introduce logos as a single polish pass once data is broader. Schema, storage, scripts, docs, and the 6 already-uploaded files all stay parked.
+
+**What changed.**
+
+UI revert (only the rendering surface):
+- `frontend/components/market-map/ProjectTable.tsx` — dropped `ProjectLogo` import + small-size tile inside the row link. Restored the pre-logo `inline-flex items-center` shape so canonical projects keep their shield icon next to the name and descriptions still line-clamp on a separate line.
+- `frontend/components/market-map/CanonicalSpecCard.tsx` — dropped the medium-size tile next to the gradient title; reverted the header to a single column. "Maintained by …" line preserved.
+- `frontend/app/market-map/project/[slug]/page.tsx` — dropped the large-size tile to the left of the H1. The "Maintained by …" subline was preserved (organization metadata, not logo-specific) and now sits directly below the title.
+- `frontend/components/market-map/ProjectLogo.tsx` — **deleted**. The future re-enable will restore it from commit `95a18c5` per the recipe in `docs/FUTURE_PLANS.md`.
+- `frontend/next.config.mjs` — `images.remotePatterns` for `*.supabase.co/storage/v1/object/public/**` is **intentionally retained**. Updated the inline comment to point at `docs/FUTURE_PLANS.md` so a future cleanup pass doesn't strip it as dead config.
+
+New parking-lot doc:
+- `docs/FUTURE_PLANS.md` (new) — centralized post-milestone polish list. Establishes the convention (Status / What is parked / To re-enable) and seeds it with the logos entry, including the full list of rails left in place (storage bucket, `projects.logo_url` column, 6 already-uploaded WebP files, upload scripts, `LOGOS.md`, Pillow pin, `remotePatterns`, universal schema slot).
+- `docs/AI_CONTEXT.md` — top-of-file pointer updated to mention the new doc alongside `DECISIONS.md` / `CHANGELOG_DEV.md`. Added `FUTURE_PLANS.md` to the repo-layout tree under `docs/`. Added step 4 to the "What to do before you make changes" checklist: read `FUTURE_PLANS.md` before ripping out anything that looks orphaned.
+
+Deliberately untouched (the rails — see `FUTURE_PLANS.md` for the full list):
+- `supabase/migrations/20260518_0001_market_map_schema.sql` (`projects.logo_url` column).
+- `supabase/migrations/20260519_0002_project_logos_storage_bucket.sql` (bucket + RLS).
+- `.cursor/skills/market-map/scripts/upload_logo.py` and `bulk_upload_logos.py`.
+- `.cursor/skills/market-map/LOGOS.md` and the cross-reference rows in `.cursor/skills/market-map/SKILL.md`.
+- `backend/requirements.txt` (`Pillow==11.3.0`).
+- Supabase Storage bucket contents (~18 KB of WebPs) and the 6 `projects.logo_url` values on Consensus Layer rows.
+
+**Files.**
+- `frontend/components/market-map/ProjectTable.tsx`
+- `frontend/components/market-map/CanonicalSpecCard.tsx`
+- `frontend/app/market-map/project/[slug]/page.tsx`
+- `frontend/components/market-map/ProjectLogo.tsx` (deleted)
+- `frontend/next.config.mjs`
+- `docs/FUTURE_PLANS.md` (new)
+- `docs/AI_CONTEXT.md`
+- `docs/CHANGELOG_DEV.md`
+
+**Verified.**
+- `npm run build` clean. `npm run lint` clean.
+- `/market-map`, `/market-map/core-protocol-architecture`, `/market-map/core-protocol-architecture/consensus-layer`, `/market-map/project/lighthouse`, `/market-map/project/ethereum-consensus-specifications` all render without empty logo tiles or stranded flex gaps.
+- Backend not touched — no Render redeploy needed; Vercel rebuilds on push.
+
+**Follow-ups.**
+- Re-enable via the recipe in `docs/FUTURE_PLANS.md` once M8.11 closes (or sooner if a future polish pass calls for it).
+- M8.5 sector loop continues with **Execution Layer** next (Geth / Nethermind / Besu / Erigon / Reth + the Yellow Paper as the canonical spec). Field split will mostly reuse the Core Protocol Architecture `sector_attributes` schema already installed.
+
+---
+
 ## 2026-05-19 16:00 — M8.5: project logos pipeline + 6 Consensus Layer logos live
 
 **Why.** Subsector tables and detail pages looked anonymous without organization marks. Needed a deterministic logo pipeline now (so it scales to ~500 entities) and 6 logos uploaded for the Consensus Layer to validate the design. Logos must look uniform regardless of source (light bg, dark bg, JPEG with white fill, transparent PNG, square or wide) and must never overpower the rest of the page.

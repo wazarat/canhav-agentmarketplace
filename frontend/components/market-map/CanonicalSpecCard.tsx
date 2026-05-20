@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ArrowUpRight, BookOpenCheck, ExternalLink, Github, ShieldCheck } from "lucide-react";
 
-import { ProjectLogo } from "@/components/market-map/ProjectLogo";
 import type { ProjectRow } from "@/lib/market-map";
 
 interface CanonicalSpecCardProps {
@@ -89,22 +88,19 @@ export function CanonicalSpecCard({ project, reasonForInclusion }: CanonicalSpec
           )}
         </div>
 
-        <div className="relative mt-5 flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <ProjectLogo project={project} size="md" />
-            <div className="min-w-0">
-              <h2 className="font-display text-2xl font-semibold leading-tight tracking-tight text-ink-50 sm:text-3xl">
-                <span className="bg-gradient-to-r from-amber-200 via-ink-50 to-amber-200 bg-clip-text text-transparent">
-                  {project.name}
-                </span>
-              </h2>
-              {maintainingOrg && (
-                <p className="mt-1 text-sm text-ink-300">
-                  Maintained by{" "}
-                  <span className="text-ink-100">{maintainingOrg}</span>
-                </p>
-              )}
-            </div>
+        <div className="relative mt-5 flex flex-wrap items-baseline justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-semibold leading-tight tracking-tight text-ink-50 sm:text-3xl">
+              <span className="bg-gradient-to-r from-amber-200 via-ink-50 to-amber-200 bg-clip-text text-transparent">
+                {project.name}
+              </span>
+            </h2>
+            {maintainingOrg && (
+              <p className="mt-1 text-sm text-ink-300">
+                Maintained by{" "}
+                <span className="text-ink-100">{maintainingOrg}</span>
+              </p>
+            )}
           </div>
           <Link
             href={`/market-map/project/${project.slug}`}
