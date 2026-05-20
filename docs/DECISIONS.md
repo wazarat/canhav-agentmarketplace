@@ -6,6 +6,42 @@
 
 ---
 
+## 2026-05-20 — `funding_model` enum lives in `subsector_attributes` first, promote to typed column when a second subsector needs it
+
+**Context.** The Execution Layer source sheet does not encode *how* each entity is funded. The four production clients have fundamentally different funding mechanics: Geth is EF-internal headcount with no discrete raise; Nethermind raised a ~$8M Series A in 2022; Besu is funded inside Consensys; Erigon runs on EF + Optimism grants plus services revenue. The Perplexity-drafted `execution-layer.fields-to-add.md` proposes a `funding_model` enum to make this legible: `venture | foundation-internal | corporate-internal | grants-plus-services | dao | community | n/a`.
+
+The same field would arguably help every other Core Protocol Architecture subsector (Consensus Layer, Validators & Staking Providers, MEV & Block Builders, Network Upgrades) and likely the DeFi / Monetary subsectors too. But promoting it to a typed `public.projects.funding_model` column now means committing to the enum *before* a second subsector validates the values.
+
+**Decision.** Land `funding_model` in `subsector_attributes` for the Execution Layer rows only, scoped to that subsector's JSON Schema. When the next subsector to use it ships (most likely Validators & Staking Providers), evaluate whether the enum needs additional values (e.g. `tokenized-public-good`, `protocol-revenue-share`) and only then promote to a typed column on `projects` via a migration. The promotion path is identical to the `maintaining_organization` candidate already noted in the consensus-layer skill — JSONB first, typed later.
+
+**Consequences.**
+- Execution-layer baselines and UI can use the enum today (Geth → `foundation-internal`, Nethermind → `venture`, etc.).
+- Cross-subsector queries (e.g. "all VC-funded execution clients vs VC-funded staking providers") need a `subsector_attributes->>'funding_model'` JSONB key path until promotion.
+- The enum is intentionally small at v1; we'll grow it deliberately rather than chase every edge case up front.
+
+**Alternatives considered.**
+- *Promote to a typed column right now.* Rejected — premature commitment without a second consumer to validate the enum's shape.
+- *Leave funding mechanics as free-text inside the existing `last_funding_round` field.* Rejected — `last_funding_round` is the actual round name (`series-a`, `seed`, `ecosystem-grant`, `acquired`), distinct from the funding *model* (the mechanism). Conflating them loses information.
+
+---
+
+## 2026-05-20 — Defer generalization of `enrich_consensus_layer.py` → `enrich_clients.py` until subsector #3
+
+**Context.** Execution Layer is the second subsector to use the same enrichment shape: GitHub-derived founded_year + release + contributors-90d, plus a hand-curated baseline registry of (org / HQ / team_size / twitter / funding triplet / share_pct / diversity_phrase) entries, plus a fixed dual-enum mapping. The Consensus Layer pass that shipped earlier today flagged the obvious next step: extract the shared logic into a generic `enrich_clients.py --subsector <slug>` that loads its baseline registry from `baselines/<slug>.py`.
+
+**Decision.** Don't generalize yet. Ship `enrich_execution_layer.py` as a near-twin of `enrich_consensus_layer.py` and revisit the abstraction once Validators & Staking Providers (M8.7) has been ingested. The third instance is where pattern-vs-coincidence becomes visible — Validators may want a totally different telemetry shape (uptime % per validator from beaconcha.in, slashing attribution, etc.) that doesn't fit the GitHub-release pattern at all.
+
+**Consequences.**
+- Two copies of the GitHub helpers, the Supabase patch helpers, and the `main()` loop. Acceptable duplication for now (~80 lines each).
+- The script-level diff between the two files reads as the spec: each one's `BASELINES` + `DIVERSITY_MAP` + per-subsector normalization. Easier to review per-subsector PRs.
+- Generalization is parked in `docs/FUTURE_PLANS.md` with a concrete recipe so the next pass doesn't have to re-derive.
+
+**Alternatives considered.**
+- *Generalize now and force Validators into the same shape.* Rejected — pre-extracting before the third consumer ships almost always bakes in the wrong abstraction.
+- *Stop here, never generalize.* Rejected — duplication will start to hurt by subsector #4 or #5. Plan to do it deliberately at M8.7.
+
+---
+
 ## 2026-05-20 — `client_diversity_risk` and `client_diversity_role` are a dual-enum, not a single field
 
 **Context.** The source Google Sheet stores Ethereum client diversity in one cell shaped like `"Historically Dominant (Elevated Correlated Failure Risk)"`. The v1 ingest split this on the first `(` into `client_diversity_risk` (enum head) and `client_diversity_risk_note` (free text). That worked for v1 but conflated two *different* dimensions: severity (how big is the concentration risk?) and role (what kind of contributor is this entity to client diversity?). A single field cannot answer both.

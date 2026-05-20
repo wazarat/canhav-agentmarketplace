@@ -14,6 +14,73 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-20 14:20 — Execution Layer Tier-1 enrichment (M8.6 ingest + universal columns + dual-enum + GitHub telemetry + funding_model)
+
+**Why.** M8.6 = Execution Layer. The 6 source rows (Geth / Nethermind / Besu / Erigon + Yellow Paper + Execution EIPs) had no projects rows in Supabase yet, and the subsector's `specific_field_schema` was a `{}` placeholder. Three Perplexity-drafted reference docs (`execution-layer.{narrative,data-sources,fields-to-add}.md`) defined (a) where each missing field should come from, (b) a new `funding_model` enum capturing the four-way split between the clients' funding mechanics, and (c) the dual-enum (`client_diversity_risk` × `client_diversity_role`) carried over from Consensus Layer. This pass implements all of the Tier-1 work in one shot and leaves the two spec rows untouched (same convention as `ethereum-consensus-specifications` from M8.5).
+
+**What changed.**
+
+Schema (`additionalProperties: true`, so still no Postgres column churn):
+- `supabase/migrations/20260520_0002_execution_layer_enrichment_schema.sql` (new) — replaces the placeholder `specific_field_schema` for `slug='execution-layer'` with the full Tier-1 shape: `client_implementation`, `role_in_execution`, `execution_scope`, `vm_type`, `gas_accounting_model`, `state_model`, `state_model_internal`, `implementation_language`, `client_diversity_risk`, `client_diversity_role`, `client_diversity_risk_note`, `execution_share_pct`, `funding_model`, `latest_release_tag`, `latest_release_date`, `contributors_last_90d`, `data_refreshed_at`, `data_confidence`. Applied via the Supabase MCP.
+- `.cursor/skills/market-map/schemas/subsectors/execution-layer.json` — local mirror, real definitions replacing the prior empty placeholder.
+- `.cursor/skills/market-map/schemas/subsectors/execution-layer.column_map.json` — real column map replacing the 4-key placeholder. Covers all 20 sheet headers including the gotchas (`Reason for inclusion` lowercase `i`, `Practitioners Note` plural, `Mainnet Maturity / Production Status`). Three underscore-prefixed meta notes documenting (a) the dual-enum split on `Client Diversity Risk Flag`, (b) the enrichment-only keys, (c) the taxonomic normalization of `vm_type` / `gas_accounting_model` / `state_model`, and (d) the deliberate Reth deferral.
+
+Ingest:
+- `python .cursor/skills/market-map/scripts/ingest_subsector.py --slug execution-layer` — 6/6 rows upserted into `projects` (4 clients + 2 specs). Sheet headers map cleanly; no validation failures.
+
+Enrichment script (new):
+- `.cursor/skills/market-map/scripts/enrich_execution_layer.py` — twin of `enrich_consensus_layer.py`. `BASELINES` registry of the 4 clients. For each, calls the GitHub REST API for `founded_year` (repo `created_at`), `latest_release_tag` + `latest_release_date` (`/releases/latest`), and `contributors_last_90d` (distinct commit authors over the last 90 days). Applies curated baselines for `hq_country`, `team_size_range`, `twitter_handle`, `total_funding_usd`, `last_funding_round`, `last_funding_date`, `funding_model`, `execution_share_pct`. Derives `client_diversity_risk` + `client_diversity_role` deterministically from each baseline's `diversity_phrase` via the new `DIVERSITY_MAP` constant (5 source phrases → severity/role pairs). Normalizes `vm_type='evm'`, `gas_accounting_model='eip-1559-plus-blob'`, `state_model='mpt'` for all clients; sets `state_model_internal='erigon-staged-sync'` for Erigon (everyone else `mpt`). Server-side merges `subsector_attributes` so the v1 ingest keys (`client_implementation`, `role_in_execution`, `client_diversity_risk_note`, …) survive. Stamps `data_refreshed_at` + `data_confidence='estimate'`. Idempotent. Supports `--dry-run` and `--skip-github`. Skips the two spec rows by construction.
+
+Curated data applied (live):
+- Geth — Ethereum Foundation / Switzerland / 20-50 / `@go_ethereum` / null funding / `foundation-internal` / 49% share / `dominant-incumbent` / `high` severity.
+- Nethermind — Nethermind / United Kingdom / 100+ / `@nethermindeth` / $8M / `series-a` 2022-01-01 / `venture` / 38% share / `balanced-contributor` / `low-medium`.
+- Besu — Consensys (via Hyperledger) / United States / 20-50 / `@HyperledgerBesu` / null funding / `corporate-internal` / 7% share / `institutional-contributor` / `low-medium`.
+- Erigon — Erigon Technologies AG / distributed / 5-20 / `@ErigonEth` / null funding / `ecosystem-grant` / `grants-plus-services` / 5% share / `architectural-diversity` / `low`.
+
+GitHub-derived (live, from the actual repos at the time of this commit):
+- Geth — founded 2013, `v1.17.3` 2026-05-11, 61 contributors / 90d.
+- Nethermind — founded 2017, `1.37.2` 2026-05-05, 64 contributors / 90d.
+- Besu — founded 2019, `26.5.0` 2026-05-12, 51 contributors / 90d.
+- Erigon — founded 2019, `v3.4.1` 2026-05-11, 40 contributors / 90d.
+
+Documentation (skills + repo docs):
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.md` — rewritten from the v1 stub into a real reference. Lists every entity, documents the v1 + enrichment field set, embeds the dual-enum mapping table (5 phrases, 2 of which are execution-only: `institutional-contributor` and `architectural-diversity`), points at the enrichment script, and calls out the same open `execution_share_pct` source question that Consensus Layer has.
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.narrative.md` (new, mirrored from the Perplexity draft) — TL;DR + audience matrix + dual-spec architecture framing. Public-site-ready copy.
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.data-sources.md` (new, mirrored) — authoritative sourcing guide with API endpoints and per-entity quick reference.
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.fields-to-add.md` (new, mirrored) — universal-field applicability matrix + tiered new fields + EIP-tracking schema proposal.
+- `docs/DECISIONS.md` — two new entries on top: (a) `funding_model` enum is execution-layer-first but cross-cutting (drop into other sector schemas later); (b) the generalization of `enrich_consensus_layer.py → enrich_clients.py` is deliberately deferred for one more pass.
+- `docs/FUTURE_PLANS.md` — three new entries above the existing logos/Consensus Tier-2 entries: (a) Execution Layer Reth seeding + Tier-2/3 fields, (b) the EIP-tracking parallel table proposal, (c) the `enrich_clients.py` generalization task.
+
+**Files.**
+- `supabase/migrations/20260520_0002_execution_layer_enrichment_schema.sql` (new)
+- `.cursor/skills/market-map/schemas/subsectors/execution-layer.json`
+- `.cursor/skills/market-map/schemas/subsectors/execution-layer.column_map.json`
+- `.cursor/skills/market-map/scripts/enrich_execution_layer.py` (new)
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.md`
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.narrative.md` (new)
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.data-sources.md` (new)
+- `.cursor/skills/market-map/sectors/core-protocol-architecture/subsectors/execution-layer.fields-to-add.md` (new)
+- `docs/DECISIONS.md`
+- `docs/FUTURE_PLANS.md`
+- `docs/CHANGELOG_DEV.md`
+
+Note that `.cursor/` is gitignored from `d3cba1d` forward, so of the files above only the migration and `docs/*` ship to GitHub. The local-only files survive on disk so future enrichment runs (and the next-thread agent) keep working.
+
+**Verified.**
+- Migration applied via Supabase MCP. Re-read `public.subsectors.specific_field_schema` for `slug='execution-layer'` and confirmed all 18 keys present.
+- Ingest: `Validated 6 rows: 6 pass, 0 fail. Upserted 6 rows into projects (subsector=execution-layer).`
+- Enrichment script: dry-run on all 4 clients, then live run — all 4 PATCHed cleanly with `✓ patched`.
+- Post-run SQL audit: every Geth / Nethermind / Besu / Erigon row carries `status='live'`, a `founded_year`, an `hq_country`, `team_size_range`, `twitter_handle`, dual-enum (`client_diversity_risk` + `client_diversity_role`), `execution_share_pct`, `funding_model`, release tag + date, `contributors_last_90d`, `data_confidence='estimate'`. Both spec rows are **untouched** — every universal field still `null` and no enrichment-only subsector keys.
+- `frontend` build not re-run because the new keys are all schema-driven JSONB; the UI's `ProjectTable` from M8.5 picks them up automatically. Frontend code change deferred until a polish pass.
+
+**Follow-ups.**
+- Wire a working `execution_share_pct` source (same blocker as Consensus Layer's `validator_share_pct`); once verified, flip `data_confidence` to `verified`.
+- Decide explicitly whether to seed Reth (Paradigm, Rust). Tracked in `docs/FUTURE_PLANS.md`.
+- Generalize the two `enrich_<subsector>.py` scripts into one `enrich_clients.py` that takes a `--subsector` argument and loads baselines from a per-subsector module. Tracked.
+- M8.7 = next sector loop step: **Validators & Staking Providers** (`validators-staking-providers`). Different shape — single-org operators rather than client implementations. Don't carry the diversity-enum convention forward without checking.
+
+---
+
 ## 2026-05-20 13:50 — Consensus Layer Tier-1 enrichment (universal columns + dual-enum + GitHub telemetry)
 
 **Why.** The 5 Consensus Layer client rows landed in M8.5 with every universal column (`status`, `founded_year`, `hq_country`, `team_size_range`, `twitter_handle`, funding triplet) at `null` — the source sheet only filled the subsector-shaped columns. The user provided two new docs (`~/wazarat/consensuslayer/consensus-layer.{data-sources,fields-to-add}.md`) defining (a) where each missing field should come from and (b) a "dual-enum" partner field (`client_diversity_role`) plus Tier-1 telemetry from GitHub. This pass implements all of it for the five clients while leaving `ethereum-consensus-specifications` untouched (the spec is shaped differently and is curated separately per the user's explicit instruction).
