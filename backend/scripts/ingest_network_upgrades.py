@@ -398,6 +398,13 @@ UPGRADE_BASELINES: List[UpgradeBaseline] = [
                 "mev-block-builders", "new-capability",
                 "Blob fee market created; new MEV vector around blob inclusion economics.",
             ),
+            UpgradeImpact(
+                "optimistic-rollups", "new-capability",
+                "EIP-4844 moved L2 data posting from calldata to blob space, cutting "
+                "Arbitrum One / OP Mainnet / Base / Blast / Unichain fees ~10x and "
+                "reshaping the rollup unit economics. Every optimistic rollup retuned "
+                "batch_posting_frequency and data_availability_layer to blobs.",
+            ),
         ),
     ),
     UpgradeBaseline(
@@ -513,6 +520,13 @@ UPGRADE_BASELINES: List[UpgradeBaseline] = [
                 "mev-block-builders", "new-capability",
                 "Blob inclusion economics shift again; relays adjust blob-bundle prioritization.",
             ),
+            UpgradeImpact(
+                "optimistic-rollups", "new-capability",
+                "EIP-7691 raises blob target/max, expanding the rollup data budget; "
+                "PeerDAS sampling lets the network scale blob bandwidth without "
+                "per-node storage growth. Every optimistic rollup gains headroom on "
+                "data_availability_layer='ethereum-l1-blobs'.",
+            ),
         ),
     ),
     UpgradeBaseline(
@@ -575,6 +589,11 @@ KNOWN_IMPACT_SUBSECTORS = {
     "execution-layer",
     "validators-staking-providers",
     "mev-block-builders",
+    # M8.10 — Sector 2's first subsector ships. Dencun + Fusaka have explicit
+    # impact rows on optimistic-rollups (calldata→blobs and blob throughput).
+    # data-availability-systems and zk-rollups join this set when M8.11+ /
+    # data-consensus-infrastructure ingests land.
+    "optimistic-rollups",
 }
 
 

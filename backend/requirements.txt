@@ -12,3 +12,8 @@ Pillow==11.3.0
 # Used by backend/scripts/ingest_network_upgrades.py to parse YAML front-matter on every
 # EIP markdown file pulled from github.com/ethereum/EIPs (M8.9 weekly worker).
 python-frontmatter==1.1.0
+# Used by .cursor/skills/market-map/scripts/enrich_optimistic_rollups.py (M8.10) to read
+# the Perplexity-cleaned XLSX workbook stashed under
+# .cursor/skills/market-map/sectors/rollup-scaling-frameworks/_source/. Will be reused by
+# enrich_zk_rollups.py / enrich_l3_appchain_frameworks.py / enrich_validiums*.py.
+openpyxl==3.1.5

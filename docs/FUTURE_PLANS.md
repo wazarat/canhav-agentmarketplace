@@ -9,6 +9,45 @@ Each entry should answer:
 
 ---
 
+## Sector 2 (Rollup & Scaling Frameworks) — sector-wide follow-ups parked by M8.10
+
+**Status.** Deferred until the upstream data is available or the UI loop needs it. M8.10 shipped the sector-wide SSoT schema (typed columns + sector-wide join tables + per-subsector sidecar pattern) and the first subsector ingest (Optimistic Rollups, 7 rows). The follow-ups below are all schema-ready — the tables exist with `0 rows`; populating them is editorial or wire-up work, not migration work.
+
+**Why deferred.** Each item below either depends on an upstream author edit, on a future subsector ingest (M8.11–M8.13), or on a live API integration we have not wired yet. The schema-on-day-one approach lets every follow-up land as data writes, not schema changes.
+
+**What is parked (M8.10 deliverables, preserved).**
+
+- `supabase/migrations/20260521_0001_rollup_scaling_sector_schema.sql` — 10 new typed columns on `public.projects`; 8 sector-wide join/lookup tables (`ecosystems`, `framework_underlying_bases`, `framework_ecosystem_alignment`, `framework_deployments`, `da_committees`, `entity_da_committee`, `entity_co_owners`, `entity_migration_history`); the `optimistic_rollup_attrs` 1:1 sidecar; the `optimistic_rollup_full_view`. All RLS-on + public-readable + service-role writes.
+- `.cursor/skills/market-map/scripts/enrich_optimistic_rollups.py` — pattern reused verbatim by M8.11–M8.13.
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/_source/Rollup-and-Scaling-Frameworks_cleaned_v1.xlsx` — Perplexity-cleaned source workbook committed so importers don't depend on `~/Downloads/`.
+- The cross-subsector reference rows (Superchain ecosystem + OP Stack/Nitro `framework_underlying_bases` + OP Stack ↔ Superchain alignment).
+
+**Sector-2 follow-ups by area.**
+
+| Item | Why parked | To re-enable |
+|---|---|---|
+| Populate `public.framework_deployments` (chain catalog per framework) per data_gaps G-8 | Long tail of OP Stack chains we won't enumerate manually; needs a Superchain registry pull | Add `refresh_framework_deployments.py` that walks `ethereum-optimism/superchain-registry` for OP Stack and `OffchainLabs/orbit-chains-registry` for Nitro. M8.12 (L3 Frameworks) is a natural place to land this |
+| Populate `public.da_committees` and `public.entity_da_committee` per data_gaps G-9 | Empty for Optimistic by design; Validiums need it | M8.13 — first rows arrive when Immutable X / StarkEx-anchored chains land |
+| Backfill `public.entity_co_owners` per data_gaps G-10 | Immutable X and dYdX-Ethereum-anchored need composite ownership (operator + engine vendor) | M8.13 — populate during the Validiums ingest pass with rows like `(immutable-x-ethereum-anchored, starkware, engine-vendor)` |
+| Populate `public.entity_migration_history` | Empty in v1 (no Optimistic migrations); first row arrives with dYdX-Ethereum-anchored | M8.13 — every `migrated-away` lifecycle flip writes a row |
+| **OP Stack ↔ Arbitrum Nitro practitioner-cell swap** | Two cells in the source sheet are swapped (fields-to-add §3d.3). v1 ships with Option A: `data_quality_flags=['practitioner_check_swap_unconfirmed']` and `practitioner_note` / `practitioner_validation_check` NULL on both rows | Author confirms intended swap. Then update the rows in `optimistic_rollup_attrs` and clear the flag. Tracked in sector `data_gaps.md` |
+| Live L2Beat / DefiLlama / growthepie integration | v1 ships curated `tvl_usd_band` / `daily_tx_count_band` / `fee_revenue_band_usd_annual` with `*_as_of_date=2026-05-21` and `data_confidence='estimate'` | Build `backend/scripts/refresh_rollup_snapshots.py` (weekly cron). Pull `https://api.l2beat.com/api/scaling/tvs` per project, refresh bands, flip `data_confidence='verified'`, stamp new `*_as_of_date`. Same data-confidence shape as M8.7/M8.8 |
+| `mev_policy_type` enum population per data-sources gap | Currently curated baseline; sheet has no structured field | Promote to a small Dune dashboard or per-chain RPC scrape once a UI feature asks for it |
+| `ethereum/EIPs` and `ethereum/consensus-specs` impact rows for Sector-2 | M8.10 added 2 rows (Dencun + Fusaka → optimistic-rollups). Pectra impact on Optimistic (smart-account batched calls cross-rollup) and earlier upgrades (Cancun, London) still parked | Add `UpgradeImpact("optimistic-rollups", "new-capability", …)` entries for additional `UPGRADE_BASELINES` rows in `backend/scripts/ingest_network_upgrades.py` as needed |
+| Frontend `/market-map/rollup-scaling-frameworks/optimistic-rollups` | Schema ready (`optimistic_rollup_full_view`). UI not built yet | M8 UI loop — query the view, render entity_role × forked_from lineage tree |
+| ZK Rollups duplicate-header (sector `data_gaps.md` G-1) | Cleaned XLSX has the right values; the upstream Google Sheet still needs the author's rename | Author edits source sheet; we don't act |
+| L3 OP Stack corrupted cell (sector `data_gaps.md` G-2) | Same shape as G-1 | Author edits source sheet |
+| dYdX-Cosmos pre-seed (sector `data_gaps.md` G-7) | M8.13 needs `migrated_to_project` to point somewhere when dydx-ethereum-anchored is ingested | Decide before M8.13 whether to seed a thin Cosmos row in `public.projects` with `entity_role='instance'` and `lifecycle_status='active'`, or leave the FK null and rely on `migrated_to_label` text fallback |
+
+**To re-enable for the next subsector (M8.11 — ZK Rollups).**
+
+1. Mirror v8 docs from `~/Downloads/canhav-skills-v8/sectors/rollup-and-scaling-frameworks/subsectors/zk-rollups.{narrative,data-sources,fields-to-add}.md` into the skill tree.
+2. Write one small migration: `supabase/migrations/20260521_0002_zk_rollups_subsector_schema.sql` adding `public.zk_rollup_attrs` (sidecar) + `public.zk_rollup_full_view`. No sector-level schema work needed — M8.10 already shipped that.
+3. Build `.cursor/skills/market-map/scripts/enrich_zk_rollups.py` from the M8.10 template. The 2 ZK engines (`zk-stack`, `starkex`) get added here. Lineage FK populated from a fresh hardcoded `forked_from_map`.
+4. Same import assertions (smart-quote scrub, snapshot-field as_of_date pairs).
+
+---
+
 ## Network Upgrades — Tier-2 / Tier-3 follow-ups (pre-Merge backfill, client_readiness, eip_authors, testnet ladder, pm tracker auto-discovery)
 
 **Status.** Deferred. Tier-1 (4-table relational schema + weekly worker for ~920 EIPs + 7 curated upgrade baselines + cross-subsector `upgrade_impact` rows) shipped 2026-05-20 as M8.9.

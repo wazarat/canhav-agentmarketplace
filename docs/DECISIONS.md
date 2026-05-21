@@ -6,6 +6,53 @@
 
 ---
 
+## 2026-05-21 — Sector 2 (Rollup & Scaling Frameworks) ships its SSoT shape as typed columns + per-subsector sidecar table + sector-wide join tables, NOT fat `subsector_attributes` JSONB; the 3+ sector promotion rule is invoked up-front because all 4 Sector-2 subsectors need the same shape on day one
+
+**Context.** Sector 2 has four subsectors — Optimistic Rollups (M8.10), ZK Rollups (M8.11), L3 & Appchain Frameworks (M8.12), Validiums (M8.13) — and a much higher SSoT density than Sector 1. 28 source-sheet rows collapse to 22 canonical entities because OP Stack, Arbitrum Nitro, ZK Stack, StarkEx, Polygon CDK, and zkSync Era each appear in multiple subsectors as the same real-world thing seen through different practitioner lenses. The v8 Perplexity bundle (`~/Downloads/canhav-skills-v8/`) calls this out explicitly in its `_workflow/PERPLEXITY-to-CURSOR-handoff.md`.
+
+Every Sector-2 row needs the same axes: an `entity_role` classifier (`instance | framework | engine | both`), a `lifecycle_status` (`active | deprecated | migrated-away | …`), a `settlement_layer`, a `data_availability_layer`, a `withdrawal_latency_minutes`, a `forked_from` self-FK for engine/framework lineage. Every framework needs ecosystem alignment (Superchain, Orbit, AggLayer, Elastic Chain). Validiums and L3s need a DA committee join. Several entities need composite ownership audit (Immutable X is operated by Immutable + engine by StarkWare; dYdX-Ethereum-anchored is operated by dYdX + engine by StarkEx).
+
+The default M8 design (per the SKILL.md 3-tier rule) is to start a new sector by stashing all new keys in `sector_attributes` / `subsector_attributes` JSONB and "promote a key to a typed column once it has stabilized across 3+ sectors." That rule exists to avoid migration churn when a key turns out to be subsector-specific. Sector 2 trips the rule on day one — these aren't keys-we-think-might-be-useful, they're keys all four subsector ingests will use immediately.
+
+A second concern: Optimistic Rollups has 30+ structured fields per row (sequencer model, fault-proof status, L2Beat stage, security council size, TVL band, fee revenue band, …). Stashing those in `subsector_attributes` JSONB makes typed filtering slow (GIN doesn't help typed `WHERE` clauses on integers / enums) and makes the snapshot-field assertion (every `*_band` requires an `*_as_of_date` companion) require client-side iteration over JSONB keys. ZK Rollups, L3 Frameworks, and Validiums each have their own dense per-row payload. The M8.9 4-table-schema decision (Network Upgrades) already set the precedent: when a subsector has >10 specialty fields, prefer a sidecar table over fat JSONB.
+
+**Decision.** Ship Sector 2's shape as three layers in `supabase/migrations/20260521_0001_rollup_scaling_sector_schema.sql`:
+
+1. **Typed columns on `public.projects`** for the keys every Sector-2 row needs: `entity_role`, `framework_subtype`, `instance_subtype`, `lifecycle_status` (default `'active'`, CHECK enum), `lifecycle_status_changed_at`, `forked_from` (self-FK, `deferrable initially deferred` for two-pass inserts), `migrated_to_project` (self-FK), `settlement_layer`, `data_availability_layer`, `withdrawal_latency_minutes`. CHECK-via-list enums (not Postgres `ENUM` types) for symmetry with M8.7 `organizations.entity_type` / M8.9 `not_applicable_reason` and for relaxability (no `ALTER TYPE` rigamarole when M8.13 discovers a new `framework_subtype`).
+
+2. **Per-subsector 1:1 sidecar tables.** Optimistic Rollups gets `public.optimistic_rollup_attrs` (~40 columns including tier-1 enums, tier-2 snapshot bands with paired `*_as_of_date` columns, tier-3 nice-to-haves, free-text summaries, `data_quality_flags text[]`, `data_refreshed_at`, `data_confidence`). M8.11–M8.13 will each add their own sidecar following the same shape (`zk_rollup_attrs`, `l3_framework_attrs`, `validium_attrs`). Sidecars use `project_id` as PK with `ON DELETE CASCADE` so the join is cheap and lifecycle is automatic.
+
+3. **Sector-wide join + lookup tables** for the SSoT relationships: `public.ecosystems` (Superchain, Orbit, AggLayer, …); `public.framework_underlying_bases` (m2m: framework → upstream engine — captures lineage that doesn't fit `forked_from`); `public.framework_ecosystem_alignment` (m2m: framework → ecosystem); `public.framework_deployments` (chains built on a framework, deferred-populate per data_gaps G-8); `public.da_committees` + `public.entity_da_committee` (used by M8.13 Validiums, empty for Optimistic); `public.entity_co_owners` (composite ownership audit, empty in v1 per G-10); `public.entity_migration_history` (append-only lifecycle audit trail, empty in v1).
+
+Front-end exposure: `public.optimistic_rollup_full_view` (security_invoker=true) joins `projects + organizations + optimistic_rollup_attrs + forked_from self-join`. Subsequent subsectors get their own `*_full_view`.
+
+The 3+ sector promotion rule is **invoked up-front** for Sector 2's typed columns because:
+- All 4 subsectors use the same keys.
+- Landing them once now costs 1 migration; landing them piecemeal would cost 4 migrations of the same shape over M8.10–M8.13.
+- The rule's purpose is avoiding migration churn. Up-front promotion is the rule's *intent*, not a violation of it.
+
+**Consequences.**
+- M8.11 (ZK Rollups), M8.12 (L3 Frameworks), and M8.13 (Validiums) need ZERO sector-level migrations. Each gets one small migration adding its own sidecar table + full_view. The shared bones are already in place.
+- Cross-subsector queries become trivial. "Every entity with `data_availability_layer='ethereum-l1-blobs'` and `entity_role='instance'`" works as a typed-column WHERE clause across all 4 subsectors after they ingest.
+- The `forked_from` self-FK lets the UI show lineage trees ("Base / Unichain / Blast / OP Mainnet → OP Stack → null") without joining JSONB.
+- Snapshot-field assertions (every `*_band` requires an `*_as_of_date`) become a per-column NOT NULL constraint candidate in a follow-up migration once we trust the data. v1 enforces it at ingest time in the enrichment script.
+- The migration is bigger than a typical M8 migration (~600 lines). That's the right shape for landing a sector's worth of structure once — the alternative (4 migrations × ~150 lines each + churn risk) is strictly worse.
+- New `not_applicable_reason` enum values added (comment-only, no CHECK): `parent_org_holds_field`, `community_operated`, `data_unavailable`, `migrated_away`. The first three were latent across M8.7–M8.9; M8.10 documents them. `migrated_away` will see first use when M8.13 ingests dYdX-Ethereum-anchored.
+
+**Alternatives considered.**
+- *Stash everything in `subsector_attributes` JSONB and promote later.* Rejected — the promotion rule exists to avoid migration churn, and writing four migrations of the same shape (one per subsector) over M8.10–M8.13 IS migration churn. Promoting up-front is the rule's intent.
+- *One big sidecar table covering all 4 subsectors with nullable columns.* Rejected — each subsector has 30+ specialty fields with different shapes (validiums need a DA committee join, ZK rollups need prover_system / proof_type, optimistic needs challenge_window). A single sidecar with 100+ nullable columns is worse than four sidecars with 30 each.
+- *Use `forked_from text` (slug reference) instead of `forked_from uuid` self-FK.* Rejected — gives up referential integrity for a marginal-at-best ergonomic gain. The `deferrable initially deferred` on the FK is exactly the escape hatch needed for two-pass inserts.
+- *Use Postgres `CREATE TYPE … AS ENUM` for entity_role / framework_subtype / lifecycle_status.* Rejected — `ALTER TYPE … ADD VALUE` is the wrong shape when M8.13 (or future Sector-2 successors) discovers a new value. CHECK-via-list constraint is one DROP + ADD away from relaxing.
+- *Build `da_committees` + `entity_co_owners` only when M8.13 lands.* Rejected mildly — shipping all 8 join tables in M8.10 costs ~80 lines of SQL and lets the L3 ingest (M8.12) optionally start populating `framework_deployments` without another migration. The carrying cost of 6 empty tables in v1 is zero.
+
+Supersedes nothing; extends the M8.7 SSoT pattern and the M8.9 sidecar-when-needed pattern. See:
+- `docs/CHANGELOG_DEV.md` 2026-05-21 — M8.10 entry.
+- `supabase/migrations/20260521_0001_rollup_scaling_sector_schema.sql` — the migration itself.
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/SKILL.md` — the sector reference.
+
+---
+
 ## 2026-05-20 — Network Upgrades gets a dedicated 4-table relational schema (event-shaped); mirror one row per upgrade into public.projects with `not_applicable_reason='protocol_event_not_entity'`
 
 **Context.** M8.9 (Network Upgrades) is the first subsector that does not fit the entity model used by Consensus, Execution, Validators, and MEV. Network Upgrades models *events* — discrete, time-stamped protocol transitions (London, The Merge, Shapella, Dencun, Pectra, Fusaka, Glamsterdam …) — not organizations. The v6 design tried to fold upgrades into `public.projects` with `entity_type='network_upgrade'`, leaving every universal field (HQ, funding, Twitter, `maintaining_organization`) NULL. Two problems with that approach:

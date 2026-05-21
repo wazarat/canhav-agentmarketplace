@@ -14,6 +14,84 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-21 17:30 — Optimistic Rollups + Sector-2 SSoT schema (M8.10)
+
+**Why.** M8.10 = Optimistic Rollups, the first subsector of Sector 2 (Rollup & Scaling Frameworks). The v8 Perplexity bundle (`~/Downloads/canhav-skills-v8/`) is the most opinionated handoff yet: 28 source-sheet rows collapse to 22 canonical entities because OP Stack, Arbitrum Nitro, ZK Stack, StarkEx, Polygon CDK, and zkSync Era each appear in multiple subsectors as the same real-world thing seen through different practitioner lenses. Sector 2 is where the SSoT pattern (one `public.projects` row per real-world entity, FK to `public.organizations` for org-level universal fields) earns its keep.
+
+The 3-tier promotion rule in `.cursor/skills/market-map/SKILL.md` says "promote a JSONB key to a typed column once it has stabilized across 3+ sectors." Sector 2 trips that rule on day one (all 4 subsectors share the same shape), so M8.10 promotes the sector-common fields up-front instead of writing the same migration four times during M8.11–M8.13. The cost is one larger migration here; the savings are three migrations avoided and three subsector ingests that "just work" against the existing schema.
+
+Optimistic Rollups itself ships 7 canonical rows: 5 instance networks (Arbitrum One, OP Mainnet, Base, Blast, Unichain) + 2 framework engines (OP Stack, Arbitrum Nitro). Same M8.7+ org SSoT pattern — `offchain-labs` backs 2 rows (arbitrum-one, arbitrum-nitro); `optimism-foundation` backs 2 rows (op-mainnet, op-stack); coinbase / uniswap-labs / blast-foundation back 1 row each. Lineage (Base/Unichain/Blast/OP Mainnet → OP Stack; Arbitrum One → Arbitrum Nitro) is encoded via the new typed `forked_from` self-FK on `public.projects`.
+
+**What changed.**
+
+Schema (sector-2-wide, lands once for the next three subsectors):
+- `supabase/migrations/20260521_0001_rollup_scaling_sector_schema.sql` (new) — adds 10 typed columns to `public.projects` (`entity_role`, `framework_subtype`, `instance_subtype`, `lifecycle_status`, `lifecycle_status_changed_at`, `forked_from`, `migrated_to_project`, `settlement_layer`, `data_availability_layer`, `withdrawal_latency_minutes`) with CHECK-via-list enums (relaxable in a future migration without `ALTER TYPE` rigamarole). Adds 8 new sector-2-scoped tables: `public.ecosystems`, `public.framework_underlying_bases`, `public.framework_ecosystem_alignment`, `public.framework_deployments` (empty in v1 per data_gaps G-8), `public.da_committees` (empty for Optimistic; used by M8.13 Validiums), `public.entity_da_committee`, `public.entity_co_owners` (empty in v1 per G-10), `public.entity_migration_history` (empty in v1; first rows arrive with M8.13 dydx-ethereum-anchored). Adds 1 subsector-specific 1:1 sidecar table `public.optimistic_rollup_attrs` (40+ columns covering tier-1/2/3 fields + free-text summaries + `data_quality_flags text[]`). Adds `public.optimistic_rollup_full_view` with `security_invoker=true` for the frontend (joins projects + organizations + sidecar + forked_from self-lineage). Extends the documented `not_applicable_reason` enum (comment-only) with `parent_org_holds_field` and `migrated_away`. All new tables RLS-on + public-readable + service-role writes. Applied via the Supabase MCP.
+
+Enrichment script (one-shot curated; cleaned XLSX is canonical v1, no live Google Sheet pull):
+- `.cursor/skills/market-map/scripts/enrich_optimistic_rollups.py` (new, ~600 lines) — uses `_enrichment.OrgBaseline` to upsert 5 orgs (`optimism-foundation`, `coinbase`, `uniswap-labs`, `blast-foundation` net-new; `offchain-labs` verify-upsert from M8.7). Loads 7 rows from `_source/Rollup-and-Scaling-Frameworks_cleaned_v1.xlsx` via `openpyxl`. Six-phase pipeline:
+  1. Org upserts (deduped to 5; idempotent merge).
+  2. Project upserts pass 1 with `forked_from=null`, populating universal columns + Sector-2 typed columns + JSONB hints.
+  3. Sidecar upserts into `optimistic_rollup_attrs` with the tier-1/2/3 + free-text payload; snapshot fields paired with `*_as_of_date = today()`; `data_confidence='estimate'` until live L2Beat/DefiLlama wire-up.
+  4. `forked_from` FK patch pass 2 from the hardcoded map (op-mainnet/base/unichain/blast → op-stack; arbitrum-one → arbitrum-nitro; frameworks themselves null).
+  5. Cross-subsector reference rows — seeds `ecosystems` (Superchain, `parent_project=op-stack.id`), `framework_underlying_bases` (OP Stack → Geth EVM; Nitro → Geth fork; both with `upstream_project_id=null` and `not_applicable_reason='data_unavailable'` since EVM implementations aren't yet tracked as projects), `framework_ecosystem_alignment` (OP Stack → Superchain `alignment_type='primary'`).
+  6. Inline assertions: every sidecar snapshot field has a non-null `*_as_of_date` companion; no string column contains U+2019 (smart-quote scrub); both framework rows carry `data_quality_flags @> ARRAY['practitioner_check_swap_unconfirmed']` (Option-A flag for the §3d.3 cell swap).
+- Naming normalization per fields-to-add §3d.4/§3d.8: strip `(Framework)` parenthetical for slugs (OP Stack, Arbitrum Nitro); rename source `Optimism` → `op-mainnet` with `aliases=['Optimism']` for search.
+- OP Stack / Arbitrum Nitro practitioner-cell swap (§3d.3) handled via Option A (flag-and-skip): `data_quality_flags=['practitioner_check_swap_unconfirmed']` set; `practitioner_note` and `practitioner_validation_check` are NULL until the author confirms the swap. Surfaced as a manual TODO at end of every run.
+- Supports `--dry-run`. Idempotent.
+
+Network Upgrades cross-link (M8.9 carry-forward):
+- `backend/scripts/ingest_network_upgrades.py` — added `optimistic-rollups` to `KNOWN_IMPACT_SUBSECTORS`; added 2 new `UpgradeImpact` rows (Dencun → `optimistic-rollups new-capability` for the calldata→blobs migration; Fusaka → `optimistic-rollups new-capability` for the PeerDAS + EIP-7691 blob throughput increase). The 2 impact rows were also inserted directly into `public.upgrade_impact` via Supabase MCP so M8.10's deliverable is complete without waiting for the next weekly worker tick.
+
+Skill docs + schemas:
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/SKILL.md` — rewritten from stub into the M8.10 sector reference. Lists the 4 subsectors, import order (engines first), sector-common typed columns, sector-wide join tables, per-subsector sidecar table mapping, naming conventions.
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/optimistic-rollups.md` — rewritten from stub into the M8.10 implementation mirror (mirrors the MEV M8.8 shape).
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/optimistic-rollups.{narrative,data-sources,fields-to-add}.md` (new — mirrored from v8 bundle).
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/data_gaps.md` (new — mirrored from v8 bundle).
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/_source/Rollup-and-Scaling-Frameworks_cleaned_v1.xlsx` (new — committed so the importer doesn't depend on `~/Downloads/`).
+- `.cursor/skills/market-map/schemas/sectors/rollup-scaling-frameworks.json` — populated with the sector-common JSONB hints (aliases, security_council_present, dao_bicameral, decentralization_roadmap_stated, upgrade_authority_inherits_from, parent_dao_slug). The structured payload lives in typed columns and the sidecar; this JSONB is for cross-subsector hints not promoted to columns.
+- `.cursor/skills/market-map/schemas/subsectors/optimistic-rollups.json` (new) — lean JSONB schema (archetype mirror + audit metadata only); the structured payload lives in the sidecar table.
+
+Dependencies:
+- `backend/requirements.txt` adds `openpyxl==3.1.5` for reading the cleaned XLSX. Reused by M8.11–M8.13 enrichment scripts.
+
+Documentation:
+- `docs/DECISIONS.md` — new top entry: Sector-2 SSoT shape (typed columns + sidecar + join tables, not fat JSONB; up-front promotion vs the 3+ sector rule).
+- `docs/CHANGELOG_DEV.md` — this entry.
+- `docs/FUTURE_PLANS.md` — appended Sector-2 follow-ups (populate `framework_deployments` per G-8, `da_committee_members` per G-9, `entity_co_owners` for Immutable X / dYdX-historical per G-10, live L2Beat/DefiLlama/growthepie snapshot enrichment, OP Stack ↔ Nitro practitioner-cell swap author follow-up, dydx-cosmos pre-seed decision per G-7).
+
+**Files.**
+- `supabase/migrations/20260521_0001_rollup_scaling_sector_schema.sql` (new)
+- `.cursor/skills/market-map/scripts/enrich_optimistic_rollups.py` (new)
+- `backend/scripts/ingest_network_upgrades.py` (KNOWN_IMPACT_SUBSECTORS + 2 UpgradeImpact rows)
+- `backend/requirements.txt` (+ `openpyxl==3.1.5`)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/SKILL.md` (rewritten)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/optimistic-rollups.md` (rewritten)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/optimistic-rollups.{narrative,data-sources,fields-to-add}.md` (new)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/data_gaps.md` (new)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/_source/Rollup-and-Scaling-Frameworks_cleaned_v1.xlsx` (new)
+- `.cursor/skills/market-map/schemas/sectors/rollup-scaling-frameworks.json` (populated)
+- `.cursor/skills/market-map/schemas/subsectors/optimistic-rollups.json` (new)
+- `docs/DECISIONS.md`, `docs/CHANGELOG_DEV.md`, `docs/FUTURE_PLANS.md`
+
+**Verified.**
+- Supabase MCP: 10 new columns on `public.projects` confirmed (`information_schema.columns` query).
+- Supabase MCP: 9 new tables created (`ecosystems`, `framework_underlying_bases`, `framework_ecosystem_alignment`, `framework_deployments`, `da_committees`, `entity_da_committee`, `entity_co_owners`, `entity_migration_history`, `optimistic_rollup_attrs`).
+- Supabase MCP: `public.optimistic_rollup_full_view` view created with `security_invoker=true`.
+- Enrichment script dry-run: 7 rows, 5 orgs, 2 framework_underlying_bases, 1 framework_ecosystem_alignment, 1 ecosystem — 0 assertion failures.
+- Enrichment script real run: same numbers, all writes succeeded.
+- Supabase MCP `select * from optimistic_rollup_full_view`: 7 rows; `forked_from_slug` correctly resolves (Base/Unichain/Blast/OP Mainnet → `op-stack`; Arbitrum One → `arbitrum-nitro`; frameworks null); `lifecycle_status='active'` everywhere; framework rows carry `data_quality_flags` with the practitioner-swap flag (`flag_count=1`); instance rows have `flag_count=null` (i.e. empty array).
+- Network upgrades patch: `select count(*) from public.upgrade_impact` = 23 (previously 21; +1 for Dencun → optimistic-rollups, +1 for Fusaka → optimistic-rollups).
+- Smoke import of patched `ingest_network_upgrades.py`: parses cleanly; `KNOWN_IMPACT_SUBSECTORS` set now has 5 members; Dencun + Fusaka baselines each carry 4 impact rows (was 3).
+
+**Follow-ups.**
+- **OP Stack / Arbitrum Nitro practitioner-cell swap** — author confirmation required to populate `practitioner_note` / `practitioner_validation_check` on `op-stack` and `arbitrum-nitro` rows. Currently NULL with `data_quality_flags=['practitioner_check_swap_unconfirmed']`. Tracked in `data_gaps.md` (mirrored from v8 bundle).
+- **Live L2Beat / DefiLlama / growthepie integration** — v1 ships curated `tvl_usd_band` / `daily_tx_count_band` / `fee_revenue_band_usd_annual` with `*_as_of_date=2026-05-21` and `data_confidence='estimate'`. Live wire-up deferred to follow-up.
+- **L3 sheet G-2 corrupted-cell** — the cleaned XLSX has the right values for the OP Stack `External Bridge Dependency` cell, but the upstream Google Sheet still needs the author's edit. Tracked in `data_gaps.md` G-2.
+- **ZK Rollups G-1 duplicate-header** — same shape: upstream sheet needs rename; cleaned XLSX is canonical for ingest. Will surface again when M8.11 runs.
+- **Frontend** — `/market-map/rollup-scaling-frameworks/optimistic-rollups` should query `public.optimistic_rollup_full_view` (not raw `public.projects`) once the M8 UI loop reaches Sector 2.
+- **M8.11 — ZK Rollups** — next subsector. Same workflow (mirror v8 docs, build `enrich_zk_rollups.py` against the cleaned XLSX, ship `public.zk_rollup_attrs` sidecar). Sector-2 schema landed in M8.10 means no migration required at the sector level.
+- M8.9 follow-ups still open: pre-Merge upgrade backfill (Frontier → Berlin), `data-availability-systems` and `zk-rollups` need to join `KNOWN_IMPACT_SUBSECTORS` when they ship.
+
 ## 2026-05-20 16:10 — Network Upgrades dedicated 4-table schema + weekly GitHub ingestion worker (M8.9)
 
 **Why.** M8.9 = Network Upgrades, the fifth subsector in the Core Protocol Architecture loop and the first one that *deliberately breaks* the entity model used by Consensus, Execution, Validators, and MEV. Network Upgrades models *events* (London, The Merge, Shapella, Dencun, Pectra, Fusaka, Glamsterdam), not organizations. The v6 design tried to fold them into `projects` with `entity_type='network_upgrade'`; the v7 Perplexity drafts (`network-upgrades.{narrative,data-sources,fields-to-add}.md`, mirrored under `.cursor/skills/`) prescribe a dedicated 4-table relational schema and a free, fully-automated weekly ingestion worker pulling from `ethereum/EIPs`, `ethereum/consensus-specs`, `ethereum/execution-specs`, and `ethereum/pm`. No paid data vendor required.
