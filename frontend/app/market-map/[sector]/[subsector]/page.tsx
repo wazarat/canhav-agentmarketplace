@@ -25,7 +25,7 @@ interface PageProps {
   params: { sector: string; subsector: string };
 }
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const sub = await getSubsector(params.subsector).catch(() => null);

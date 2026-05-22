@@ -5,10 +5,11 @@ read; writes happen out-of-band via the ingest scripts using the service-role ke
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.services.supabase import SupabaseError, get, get_single, is_configured
 
@@ -99,14 +100,25 @@ def _is_empty(value: Any) -> bool:
     return False
 
 
-async def _merge_sector2_view(project: Dict[str, Any]) -> None:
-    """For Rollup-sector projects, fetch the matching `*_full_view` row and
-    merge sidecar columns into `sector_attributes` / `subsector_attributes`.
+# Columns added to the rollup `*_full_view`s by migration 20260523_0001 that
+# carry sector/subsector schema metadata, not sidecar attributes. We strip them
+# from the JSONB merge and (where applicable) project them up into the
+# `sector` / `subsector` nested objects on the response.
+_VIEW_SCHEMA_PASSTHROUGH = {
+    "sector_name",
+    "subsector_name",
+    "sector_common_field_schema",
+    "subsector_specific_field_schema",
+}
 
-    Existing JSONB keys win — the JSONB import is authoritative; the sidecar
-    is a richer overlay that only fills gaps. Mutates `project` in place."""
+
+async def _fetch_sector2_view_row(project: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Look up the matching `*_full_view` row for a rollup project. Returns
+    None when the project is not in Sector 2 or no view is mapped. Logs and
+    returns None on Supabase errors — the project page should still render
+    with the universal projects.* columns even if the view fetch fails."""
     if project.get("sector_slug") != SECTOR2_SLUG:
-        return
+        return None
 
     subsector_slug = project.get("subsector_slug")
     view_name = SECTOR2_VIEWS.get(subsector_slug or "")
@@ -116,14 +128,14 @@ async def _merge_sector2_view(project: Dict[str, Any]) -> None:
             project.get("slug"),
             subsector_slug,
         )
-        return
+        return None
 
     project_id = project.get("id")
     if not project_id:
-        return
+        return None
 
     try:
-        view_row = await get_single(
+        return await get_single(
             f"/rest/v1/{view_name}",
             params={"project_id": f"eq.{project_id}", "select": "*"},
         )
@@ -134,21 +146,19 @@ async def _merge_sector2_view(project: Dict[str, Any]) -> None:
             view_name,
             exc,
         )
-        return
+        return None
 
-    if view_row is None:
-        logger.warning(
-            "rollup project %s has no row in %s",
-            project.get("slug"),
-            view_name,
-        )
-        return
 
+def _merge_sector2_view_row(project: Dict[str, Any], view_row: Dict[str, Any]) -> None:
+    """Merge sidecar columns from a `*_full_view` row into the project's
+    `sector_attributes` / `subsector_attributes` JSONB. Existing JSONB keys
+    win — the JSONB import is authoritative; the sidecar is an overlay that
+    only fills gaps. Mutates `project` in place."""
     sector_attrs: Dict[str, Any] = dict(project.get("sector_attributes") or {})
     subsector_attrs: Dict[str, Any] = dict(project.get("subsector_attributes") or {})
 
     for key, value in view_row.items():
-        if key in SECTOR2_VIEW_STRIP:
+        if key in SECTOR2_VIEW_STRIP or key in _VIEW_SCHEMA_PASSTHROUGH:
             continue
         if _is_empty(value):
             continue
@@ -162,6 +172,17 @@ async def _merge_sector2_view(project: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+# Cache-Control for read-only Market Map endpoints. The data set changes only
+# when the ingest scripts run out-of-band, so 60s freshness with 5m
+# stale-while-revalidate is conservative and dramatically reduces Supabase load
+# on warm caches (Next.js, Render's edge, browser back/forward, CDN).
+_MARKET_MAP_CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300"
+
+
+def _set_cache_headers(response: Response) -> None:
+    response.headers["Cache-Control"] = _MARKET_MAP_CACHE_CONTROL
+
 
 def _require_supabase() -> None:
     if not is_configured():
@@ -185,9 +206,10 @@ def _map_supabase_error(exc: SupabaseError) -> HTTPException:
 # ---------------------------------------------------------------------------
 
 @router.get("/sectors")
-async def list_sectors() -> List[Dict[str, Any]]:
+async def list_sectors(response: Response) -> List[Dict[str, Any]]:
     """All sectors with subsector + project counts. Driven by the sector_summary view."""
     _require_supabase()
+    _set_cache_headers(response)
     try:
         rows = await get(
             "/rest/v1/sector_summary",
@@ -200,28 +222,30 @@ async def list_sectors() -> List[Dict[str, Any]]:
 
 
 @router.get("/sectors/{sector_slug}")
-async def get_sector(sector_slug: str) -> Dict[str, Any]:
+async def get_sector(sector_slug: str, response: Response) -> Dict[str, Any]:
     """A sector + its subsectors (with counts)."""
     _require_supabase()
+    _set_cache_headers(response)
     try:
-        sector = await get_single(
-            "/rest/v1/sectors",
-            params={
-                "slug": f"eq.{sector_slug}",
-                "select": "slug,name,description,display_order,common_field_schema",
-            },
+        sector, subsectors = await asyncio.gather(
+            get_single(
+                "/rest/v1/sectors",
+                params={
+                    "slug": f"eq.{sector_slug}",
+                    "select": "slug,name,description,display_order,common_field_schema",
+                },
+            ),
+            get(
+                "/rest/v1/subsector_summary",
+                params={
+                    "sector_slug": f"eq.{sector_slug}",
+                    "select": "*",
+                    "order": "subsector_display_order.asc",
+                },
+            ),
         )
         if sector is None:
             raise HTTPException(status_code=404, detail=f"Sector not found: {sector_slug}")
-
-        subsectors = await get(
-            "/rest/v1/subsector_summary",
-            params={
-                "sector_slug": f"eq.{sector_slug}",
-                "select": "*",
-                "order": "subsector_display_order.asc",
-            },
-        )
     except SupabaseError as exc:
         logger.error("sector get failed: %s body=%s", exc, exc.body)
         raise _map_supabase_error(exc) from exc
@@ -230,41 +254,44 @@ async def get_sector(sector_slug: str) -> Dict[str, Any]:
 
 
 @router.get("/subsectors/{subsector_slug}")
-async def get_subsector(subsector_slug: str) -> Dict[str, Any]:
-    """A subsector + its parent sector + its specific_field_schema."""
+async def get_subsector(subsector_slug: str, response: Response) -> Dict[str, Any]:
+    """A subsector + its parent sector + its specific_field_schema.
+
+    Uses PostgREST resource embedding so one round-trip covers both rows.
+    """
     _require_supabase()
+    _set_cache_headers(response)
     try:
         sub = await get_single(
             "/rest/v1/subsectors",
             params={
                 "slug": f"eq.{subsector_slug}",
-                "select": "slug,sector_slug,name,description,display_order,specific_field_schema,source_sheet_id,source_sheet_gid",
-            },
-        )
-        if sub is None:
-            raise HTTPException(status_code=404, detail=f"Subsector not found: {subsector_slug}")
-
-        sector = await get_single(
-            "/rest/v1/sectors",
-            params={
-                "slug": f"eq.{sub['sector_slug']}",
-                "select": "slug,name,common_field_schema",
+                "select": (
+                    "slug,sector_slug,name,description,display_order,"
+                    "specific_field_schema,source_sheet_id,source_sheet_gid,"
+                    "sector:sectors(slug,name,common_field_schema)"
+                ),
             },
         )
     except SupabaseError as exc:
         logger.error("subsector get failed: %s body=%s", exc, exc.body)
         raise _map_supabase_error(exc) from exc
 
-    return {**sub, "sector": sector}
+    if sub is None:
+        raise HTTPException(status_code=404, detail=f"Subsector not found: {subsector_slug}")
+
+    return sub
 
 
 @router.get("/subsectors/{subsector_slug}/projects")
 async def list_subsector_projects(
     subsector_slug: str,
+    response: Response,
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> List[Dict[str, Any]]:
     _require_supabase()
+    _set_cache_headers(response)
     try:
         rows = await get(
             "/rest/v1/projects",
@@ -284,6 +311,7 @@ async def list_subsector_projects(
 
 @router.get("/projects")
 async def list_projects(
+    response: Response,
     sector: Optional[str] = None,
     subsector: Optional[str] = None,
     search: Optional[str] = None,
@@ -293,6 +321,7 @@ async def list_projects(
     offset: int = Query(default=0, ge=0),
 ) -> List[Dict[str, Any]]:
     _require_supabase()
+    _set_cache_headers(response)
     params: Dict[str, str] = {
         "select": "*",
         "order": "name.asc",
@@ -319,31 +348,43 @@ async def list_projects(
 
 
 @router.get("/projects/{slug}")
-async def get_project(slug: str) -> Dict[str, Any]:
+async def get_project(slug: str, response: Response) -> Dict[str, Any]:
+    """Fetch a project with its sector/subsector schemas embedded in one PostgREST
+    round-trip via resource embedding. For Sector-2 (Rollup) projects the matching
+    `*_full_view` row is fetched in parallel and its sidecar columns are merged
+    into the JSONB blobs. Net: at most one round-trip of latency regardless of
+    which sector the project lives in.
+
+    The rollup views were extended in migration 20260523_0001 with
+    sector_common_field_schema / subsector_specific_field_schema columns; a future
+    refactor could drop the embedded sector/subsector select and serve the rollup
+    path from the view alone, but the views don't yet include every universal
+    `public.projects` column the frontend reads (stage, hq_country, team_size_range,
+    total_funding_usd, sector_attributes JSONB, etc.), so we keep both paths
+    converging through the projects table for now."""
     _require_supabase()
+    _set_cache_headers(response)
     try:
         project = await get_single(
             "/rest/v1/projects",
-            params={"slug": f"eq.{slug}", "select": "*"},
-        )
-        if project is None:
-            raise HTTPException(status_code=404, detail=f"Project not found: {slug}")
-
-        sector = await get_single(
-            "/rest/v1/sectors",
-            params={"slug": f"eq.{project['sector_slug']}", "select": "slug,name,common_field_schema"},
-        )
-        subsector = await get_single(
-            "/rest/v1/subsectors",
             params={
-                "slug": f"eq.{project['subsector_slug']}",
-                "select": "slug,name,specific_field_schema",
+                "slug": f"eq.{slug}",
+                "select": (
+                    "*,"
+                    "sector:sectors(slug,name,common_field_schema),"
+                    "subsector:subsectors(slug,name,specific_field_schema)"
+                ),
             },
         )
     except SupabaseError as exc:
         logger.error("project get failed: %s body=%s", exc, exc.body)
         raise _map_supabase_error(exc) from exc
 
-    await _merge_sector2_view(project)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project not found: {slug}")
 
-    return {**project, "sector": sector, "subsector": subsector}
+    view_row = await _fetch_sector2_view_row(project)
+    if view_row is not None:
+        _merge_sector2_view_row(project, view_row)
+
+    return project

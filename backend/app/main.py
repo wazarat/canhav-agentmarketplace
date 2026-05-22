@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from app.routes.market_map import router as market_map_router
 from app.routes.waitlist import router as waitlist_router
 from app.schemas import HealthResponse
 from app.services.instantly import is_configured as instantly_configured
+from app.services.supabase import aclose as supabase_aclose
 from app.services.supabase import is_configured as supabase_configured
 
 load_dotenv()
@@ -20,10 +22,20 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    try:
+        yield
+    finally:
+        await supabase_aclose()
+
+
 app = FastAPI(
     title="CanHav Backend",
     description="Backend API for canhav.com — waitlist + future agent marketplace endpoints.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 

@@ -10,9 +10,12 @@ export const metadata: Metadata = {
     "A live, searchable map of projects building across the blockchain ecosystem. Sector by sector, curated by the CanHav research team.",
 };
 
-// M8 build phase: render fresh on every request so newly-ingested rows appear instantly.
-// Flip back to `export const revalidate = 60` once all 36 subsectors are seeded.
-export const dynamic = "force-dynamic";
+// ISR: regenerate at most once per minute. The backend also emits
+// `Cache-Control: public, max-age=60, stale-while-revalidate=300`, so warm
+// Next.js caches + the backend's keep-alive Supabase client cut perceived
+// latency to near-zero on warm navigations. Ingest scripts run out-of-band
+// and can wait up to a minute to appear in the UI.
+export const revalidate = 60;
 
 export default async function MarketMapPage() {
   let sectors: SectorSummary[] = [];
