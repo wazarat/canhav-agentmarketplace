@@ -34,6 +34,21 @@ const PROSE_FIELDS = new Set([
   "framework_architecture_summary",
   "deployment_model_summary",
   "interoperability_summary",
+  // Sector 3 (Monetary & Access Rails) long-form fields.
+  "peg_enforcement_mechanism",
+  "stress_event_behavior",
+  "decentralization_impact",
+  "yield_mechanism_description",
+  "historical_regulatory_actions",
+  "reserve_composition",
+  "primary_function",
+  "primary_use_case",
+  "ethereum_deployment",
+  "ethereum_support",
+  "regulatory_status",
+  "governance_control",
+  "redemption_availability",
+  "collateralization_requirement",
 ]);
 
 function splitList(value: string): string[] {
@@ -100,7 +115,52 @@ function formatValue(value: unknown, key?: string): React.ReactNode {
   if (value === null || value === undefined || value === "") return <span className="text-ink-300">—</span>;
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "number") return value.toLocaleString();
-  if (Array.isArray(value)) return value.join(", ");
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-ink-300">—</span>;
+    // Array of plain objects -> stacked card list (forward-compatible; not used by
+    // Sector 3 v1 but sets the renderer up for arrays-of-objects in future bundles).
+    if (value.every((v) => v !== null && typeof v === "object" && !Array.isArray(v))) {
+      return (
+        <ul className="space-y-2">
+          {value.map((item, i) => {
+            const obj = item as Record<string, unknown>;
+            return (
+              <li
+                key={i}
+                className="rounded-md border border-ink-700/40 bg-ink-900/40 px-3 py-2 text-xs"
+              >
+                <dl className="space-y-0.5">
+                  {Object.entries(obj).map(([k, v]) => (
+                    <div key={k} className="flex gap-2">
+                      <dt className="font-mono uppercase tracking-wider text-ink-300">
+                        {k.replace(/_/g, " ")}:
+                      </dt>
+                      <dd className="text-ink-100">{formatValue(v)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+    // String arrays >= 2 items render as bullets for scannability; single-element
+    // arrays render inline so they don't waste vertical space.
+    if (value.length >= 2 && value.every((v) => typeof v === "string")) {
+      return (
+        <ul className="space-y-1.5">
+          {(value as string[]).map((it, i) => (
+            <li key={i} className="flex gap-2 text-ink-100">
+              <span className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-electric-500/70" />
+              <span>{it}</span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    return value.join(", ");
+  }
   if (typeof value === "object") return <code className="text-xs text-ink-300">{JSON.stringify(value)}</code>;
   const raw = String(value);
   if (key && LIST_FIELDS.has(key)) {
@@ -124,8 +184,10 @@ function formatValue(value: unknown, key?: string): React.ReactNode {
   return raw;
 }
 
-function fieldNeedsTopAlign(key: string): boolean {
-  return LIST_FIELDS.has(key) || PROSE_FIELDS.has(key);
+function fieldNeedsTopAlign(key: string, value?: unknown): boolean {
+  if (LIST_FIELDS.has(key) || PROSE_FIELDS.has(key)) return true;
+  if (Array.isArray(value) && value.length >= 2) return true;
+  return false;
 }
 
 function formatFunding(usd: number | null): string {
@@ -266,7 +328,7 @@ export default async function ProjectPage({ params }: PageProps) {
                   key={key}
                   label={humanLabel(key, project.sector?.common_field_schema)}
                   value={formatValue(value, key)}
-                  alignTop={fieldNeedsTopAlign(key)}
+                  alignTop={fieldNeedsTopAlign(key, value)}
                 />
               ))}
             </dl>
@@ -285,7 +347,7 @@ export default async function ProjectPage({ params }: PageProps) {
                   key={key}
                   label={humanLabel(key, project.subsector?.specific_field_schema)}
                   value={formatValue(value, key)}
-                  alignTop={fieldNeedsTopAlign(key)}
+                  alignTop={fieldNeedsTopAlign(key, value)}
                 />
               ))}
             </dl>

@@ -43,6 +43,10 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+# Local Python virtualenv used by the market-map ingest scripts
+.venv-ingest/
+*.venv/
+
 # Vercel
 .vercel
 
