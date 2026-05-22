@@ -14,6 +14,74 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-22 14:00 — Sector 2 complete: ZK Rollups + L3 & Appchain + Validiums (M8.11–M8.13) + OP Stack/Nitro practitioner-swap closure
+
+**Why.** With M8.10 (Optimistic Rollups + sector-2 SSoT schema) shipped on 2026-05-21, the remaining three subsectors of Sector 2 follow the same pattern: cleaned XLSX is canonical v1, sidecar table per subsector for 30+ specialty fields, JSONB schema kept lean as audit-metadata hints. The differentiator across M8.11–M8.13 is the **cross-subsector membership pattern**: 6 real-world entities (`op-stack`, `arbitrum-nitro`, `zk-stack`, `starkex`, `polygon-cdk`, `zksync-era`) each appear in 2-3 subsectors as the same entity through different practitioner lenses. M8.11 introduces `public.subsector_memberships` to enforce SSoT-with-multi-subsector (one project row per real-world thing, N membership rows for N subsectors it participates in). M8.12 and M8.13 then layer 5 new framework rows and 2 new instance rows on top without duplicating any engines.
+
+**What changed.**
+
+M8.11 — ZK Rollups (8 rows: 6 instances + 2 engines `zk-stack`, `starkex`):
+- `supabase/migrations/20260522_0001_zk_rollups_subsector_schema.sql` (new) — introduces `public.subsector_memberships` (sector-wide cross-subsector join, with `primary_membership` boolean and a unique partial index ensuring exactly one primary per project). Backfills 'home' memberships for the 7 M8.10 Optimistic rows. Adds `public.zk_rollup_attrs` (1:1 sidecar, 50+ columns covering proof_system / prover_decentralization / sequencer_model / evm_equivalence_level + Tier-2 snapshot bands with `_as_of_date` companions + dual-enum splits + free-text). Adds `public.zk_rollup_full_view` with `security_invoker=true`. Applied via Supabase MCP.
+- `.cursor/skills/market-map/scripts/enrich_zk_rollups.py` (new) — 6 orgs upserted (5 net-new: `matter-labs`, `polygon-labs`, `starkware`, `linea-foundation`, `scroll-foundation`; existing verify); 8 project rows + sidecars; `forked_from` two-pass FK; `framework_underlying_bases` edges (StarkEx → Cairo VM placeholder, ZK Stack → zkSync Era engine); `framework_ecosystem_alignment` rows. Honors the duplicate-`Practitioner's Note` header bug (G-1): cleaned XLSX collapses the two-col duplicate into a single value; ingest sets `practitioner_note=null` and adds `data_quality_flags=['zk_duplicate_header_practitioner_note_missing']` until the source sheet renames the column.
+- `.cursor/skills/market-map/schemas/subsectors/zk-rollups.json` (new) — lean JSONB hints; structured payload lives in sidecar.
+- `backend/scripts/ingest_network_upgrades.py` — added `'zk-rollups'` to `KNOWN_IMPACT_SUBSECTORS`. Backfilled 2 `UpgradeImpact` rows directly in `public.upgrade_impact` (Dencun → ZK rollups: EIP-4844 blob space for validity proofs + state diffs; Fusaka → ZK rollups: PeerDAS + EIP-7691 remove the near-term DA ceiling).
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/zk-rollups.{md,narrative,data-sources,fields-to-add}.md` (new — mirrored from v8 bundle).
+
+M8.12 — L3 & Appchain Frameworks (7 rows: 5 frameworks NEW + 2 engine memberships):
+- `supabase/migrations/20260522_0002_l3_appchain_frameworks_subsector_schema.sql` (new) — adds `public.l3_framework_attrs` (sidecar with framework_archetype / abstraction_level / engineering_burden_level / sovereignty_level / vendor_lock_in_level + dual-enum text companions + `number_of_chains_deployed` snapshot with `as_of_date`) and `public.l3_framework_full_view`. Applied via Supabase MCP.
+- `.cursor/skills/market-map/scripts/enrich_l3_appchain_frameworks.py` (new) — 3 net-new orgs (`ava-labs`, `caldera-inc`, `conduit-xyz`); 5 new project rows (`arbitrum-orbit`, `polygon-cdk`, `avalanche-hypersdk`, `caldera`, `conduit`); cross-subsector resolve for `op-stack` (from M8.10) and `zk-stack` (from M8.11) with sidecar-only writes + secondary `subsector_memberships` rows. `forked_from` edges: orbit → nitro, polygon-cdk → polygon-zkevm. `framework_underlying_bases` rows: caldera → {op-stack, nitro, zk-stack}; conduit → op-stack.
+- Honors L3 sheet G-2 corrupted-cell (OP Stack `External Bridge Dependency`): cleaned XLSX preserves placeholder; sidecar row gets `external_bridge_required_bool=null`, `not_applicable_reason='data_unavailable'`, `data_quality_flags=['op_stack_l3_external_bridge_corrupted']`. Tracked in `data_gaps.md` G-2 awaiting source-sheet fix.
+- `.cursor/skills/market-map/schemas/subsectors/l3-appchain-frameworks.json` (new) — lean JSONB.
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/l3-appchain-frameworks.{md,narrative,data-sources,fields-to-add}.md` (new — mirrored from v8 bundle).
+
+M8.13 — Validiums, Volitions & Hybrid Rollups (6 rows: 2 NEW + 4 cross-subsector members):
+- `supabase/migrations/20260522_0003_validiums_subsector_schema.sql` (new) — adds `public.validium_attrs` (sidecar with rollup_variant / execution_proof_type / da_location / da_mode_switching / da_provider_type / ethereum_verification_scope / failure_blast_radius / user_exit_risk_level / production_status + dual-enum text companions + `data_quality_flags`). The sidecar enforces (via documentation; CHECK constraint deferred to v2) that `ethereum_verification_scope != 'execution-and-da'` for validiums — that value would mean full rollup. `public.validium_full_view` drives off `subsector_memberships` so cross-subsector entities surface here alongside the 2 home rows. Applied via Supabase MCP.
+- `.cursor/skills/market-map/scripts/enrich_validiums.py` (new, ~700 lines) — 2 net-new orgs (`immutable`, `dydx-trading`) + 1 verify (`starkware`). 2 new project rows (`immutable-x`, `dydx-ethereum-anchored`) — both `entity_role='instance'`, `instance_subtype='application-specific-validium'`, `forked_from=starkex`. 4 cross-subsector members resolved by slug: `starkex` (role `primary-engine` — primary economic claim is HERE, not in ZK Rollups), `zk-stack` (role `validium-capable` — its 3rd subsector), `polygon-cdk` (role `validium-capable`), `zksync-era` (role `volition-mode`). 6 sidecar rows. 5 `da_committees` seeded: `starkex-dac-immutable-x`, `starkex-dac-dydx-historical`, `zk-stack-da-default`, `polygon-cdk-da-default`, `zksync-era-volition-da`. 5 `entity_da_committee` join rows. 4 `entity_co_owners` rows (`immutable-x` ↔ {immutable, starkware}; `dydx-ethereum-anchored` ↔ {dydx-trading, starkware}). 1 `entity_migration_history` row for `dydx-ethereum-anchored` (active → migrated-away on 2023-10-26; `migrated_to_label='dydx-cosmos (out of scope; Sector 2 v1)'` because the Cosmos sector doesn't exist yet, per `data_gaps.md` G-7).
+- Inline assertions at the end of every run validate membership counts (`zk-stack=3`, `starkex/polygon-cdk/zksync-era=2`, `immutable-x/dydx-ethereum-anchored=1`), `ethereum_verification_scope != 'execution-and-da'` everywhere, and the dYdX migration_history row exists. All pass.
+- `.cursor/skills/market-map/schemas/subsectors/validiums-volitions-hybrid.json` (new) — lean JSONB.
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/validiums-volitions-hybrid.{md,narrative,data-sources,fields-to-add}.md` (new — mirrored from v8 bundle).
+
+OP Stack ↔ Arbitrum Nitro practitioner-cell swap (M8.10 carry-forward) — CLOSED:
+- The source sheet had two cells swapped between the OP Stack and Arbitrum Nitro rows: OP Stack's `Practitioner validation check` cell held Nitro's `Practitioner's note` content, and Nitro's `Practitioner's note` cell held OP Stack's `Practitioner validation check` content. M8.10 shipped Option A: both pairs of cells nulled with `data_quality_flags=['practitioner_check_swap_unconfirmed']`.
+- 2026-05-22 resolution: author confirmed the intended pairing. Executed UPDATE on `public.optimistic_rollup_attrs` via Supabase MCP for both rows: populated `practitioner_note` and `practitioner_validation_check` with the correct text and removed the flag from `data_quality_flags`. Verified both rows now show all four cells populated and `data_quality_flags=[]`.
+- `data_gaps.md` updated with a CLOSED section documenting the closure with the exact cell values.
+
+Sector-level docs:
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/SKILL.md` — M8.11/M8.12/M8.13 marked complete; sidecar table mapping extended; cross-subsector memberships section added with expected end-state counts.
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/data_gaps.md` — practitioner-swap CLOSED section appended.
+
+**Files.**
+- `supabase/migrations/20260522_0001_zk_rollups_subsector_schema.sql` (new)
+- `supabase/migrations/20260522_0002_l3_appchain_frameworks_subsector_schema.sql` (new)
+- `supabase/migrations/20260522_0003_validiums_subsector_schema.sql` (new)
+- `.cursor/skills/market-map/scripts/enrich_zk_rollups.py` (new)
+- `.cursor/skills/market-map/scripts/enrich_l3_appchain_frameworks.py` (new)
+- `.cursor/skills/market-map/scripts/enrich_validiums.py` (new)
+- `.cursor/skills/market-map/schemas/subsectors/zk-rollups.json` (new)
+- `.cursor/skills/market-map/schemas/subsectors/l3-appchain-frameworks.json` (new)
+- `.cursor/skills/market-map/schemas/subsectors/validiums-volitions-hybrid.json` (new)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/SKILL.md` (M8.11/M8.12/M8.13 status)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/subsectors/{zk-rollups,l3-appchain-frameworks,validiums-volitions-hybrid}.{md,narrative,data-sources,fields-to-add}.md` (mirrored from v8)
+- `.cursor/skills/market-map/sectors/rollup-scaling-frameworks/data_gaps.md` (practitioner-swap CLOSED entry)
+- `backend/scripts/ingest_network_upgrades.py` (added zk-rollups to KNOWN_IMPACT_SUBSECTORS)
+
+**Verified.**
+- Supabase MCP: `select count(*) from public.subsector_memberships` returns expected counts. Membership cardinality per project verified by enrichment-script inline assertions (Phase 10, 6/6 passing).
+- Supabase MCP: `select count(*) from public.validium_full_view` returns 6 rows; all 6 cross-subsector/home labels correct.
+- Supabase MCP: `select * from public.optimistic_rollup_attrs where data_quality_flags @> array['practitioner_check_swap_unconfirmed']` returns 0 rows (was 2 before the swap closure).
+- Supabase MCP: `select practitioner_note, practitioner_validation_check from public.optimistic_rollup_attrs join projects using (...) where slug in ('op-stack','arbitrum-nitro')` — both cells populated on both rows.
+- Enrichment scripts: all three (`enrich_zk_rollups.py`, `enrich_l3_appchain_frameworks.py`, `enrich_validiums.py`) run idempotently; re-running the validiums script writes 0 new rows and re-asserts all 6 membership counts.
+- `enrich_validiums.py` final assertion run: 6 sidecars, 6 memberships, 5 da_committees, 5 entity_da_committee joins, 4 entity_co_owners, 1 entity_migration_history — all pass.
+
+**Follow-ups.**
+- **G-1, G-2, G-3, G-4** source-sheet fixes still pending author edits (cleaned XLSX continues to act as canonical for ingest).
+- **G-7 dydx-cosmos placeholder** — Cosmos sector doesn't exist yet. `entity_migration_history.migrated_to_label='dydx-cosmos (out of scope; Sector 2 v1)'` is the v1 placeholder; switch to a real `migrated_to_project` FK once a Cosmos sector lands.
+- **G-9 `da_committee_members`** — table created in M8.10 but populated lazily; populate via on-chain reads in v2.
+- **`framework_deployments`** — table created in M8.10; still empty per G-8.
+- **Live snapshots for Sector 2** — TVL / fee revenue / daily tx bands still `data_confidence='estimate'`; live wire-up from L2Beat / DefiLlama / growthepie deferred.
+- **Frontend** — `/market-map/rollup-scaling-frameworks/{zk-rollups,l3-appchain-frameworks,validiums-volitions-hybrid}` should query the new `*_full_view` views once the M8 UI loop reaches each subsector.
+- **`.cursor/` git-ignored artifacts** — every artifact under `.cursor/skills/` (sidecar enrich scripts, subsector docs, lean JSONB schemas, the cleaned XLSX) is intentionally git-ignored. Production artifacts (migrations under `supabase/migrations/`, `backend/scripts/ingest_network_upgrades.py`, `docs/`) ARE committed. The local skill tree persists for future agent sessions.
+
 ## 2026-05-21 17:30 — Optimistic Rollups + Sector-2 SSoT schema (M8.10)
 
 **Why.** M8.10 = Optimistic Rollups, the first subsector of Sector 2 (Rollup & Scaling Frameworks). The v8 Perplexity bundle (`~/Downloads/canhav-skills-v8/`) is the most opinionated handoff yet: 28 source-sheet rows collapse to 22 canonical entities because OP Stack, Arbitrum Nitro, ZK Stack, StarkEx, Polygon CDK, and zkSync Era each appear in multiple subsectors as the same real-world thing seen through different practitioner lenses. Sector 2 is where the SSoT pattern (one `public.projects` row per real-world entity, FK to `public.organizations` for org-level universal fields) earns its keep.

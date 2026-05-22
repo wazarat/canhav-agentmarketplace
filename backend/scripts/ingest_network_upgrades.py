@@ -405,6 +405,14 @@ UPGRADE_BASELINES: List[UpgradeBaseline] = [
                 "reshaping the rollup unit economics. Every optimistic rollup retuned "
                 "batch_posting_frequency and data_availability_layer to blobs.",
             ),
+            UpgradeImpact(
+                "zk-rollups", "new-capability",
+                "EIP-4844 lets ZK rollups post compressed validity proofs + state diffs "
+                "into blob space instead of calldata. zkSync Era, Starknet, Scroll, "
+                "Polygon zkEVM, and Linea all retuned their data_availability_layer "
+                "to 'ethereum-l1-blobs' shortly after Dencun activation, with proving "
+                "+ DA cost compression driving 5-20x fee reductions for users.",
+            ),
         ),
     ),
     UpgradeBaseline(
@@ -527,6 +535,14 @@ UPGRADE_BASELINES: List[UpgradeBaseline] = [
                 "per-node storage growth. Every optimistic rollup gains headroom on "
                 "data_availability_layer='ethereum-l1-blobs'.",
             ),
+            UpgradeImpact(
+                "zk-rollups", "new-capability",
+                "Fusaka's blob throughput expansion (EIP-7691) and PeerDAS sampling "
+                "remove the near-term DA ceiling for ZK rollups. zkSync Era, Scroll, "
+                "Polygon zkEVM, Linea, and Taiko all gain proportionally more budget "
+                "for state diffs + proof artifacts at data_availability_layer="
+                "'ethereum-l1-blobs', deferring the need to move to validium mode.",
+            ),
         ),
     ),
     UpgradeBaseline(
@@ -591,9 +607,13 @@ KNOWN_IMPACT_SUBSECTORS = {
     "mev-block-builders",
     # M8.10 — Sector 2's first subsector ships. Dencun + Fusaka have explicit
     # impact rows on optimistic-rollups (calldata→blobs and blob throughput).
-    # data-availability-systems and zk-rollups join this set when M8.11+ /
-    # data-consensus-infrastructure ingests land.
     "optimistic-rollups",
+    # M8.11 — ZK Rollups subsector ships. Dencun + Fusaka also drive ZK rollup
+    # economics (Dencun cut data-posting costs ~10-100x; Fusaka raises blob
+    # throughput which ZK rollups consume the same way Optimistic ones do).
+    # data-availability-systems joins this set when data-consensus-infrastructure
+    # ingests land.
+    "zk-rollups",
 }
 
 
