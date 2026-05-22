@@ -361,7 +361,13 @@ async def get_project(slug: str, response: Response) -> Dict[str, Any]:
     path from the view alone, but the views don't yet include every universal
     `public.projects` column the frontend reads (stage, hq_country, team_size_range,
     total_funding_usd, sector_attributes JSONB, etc.), so we keep both paths
-    converging through the projects table for now."""
+    converging through the projects table for now.
+
+    `subsectors!projects_subsector_slug_fkey` disambiguates the embed:
+    `public.subsector_memberships` (added M8.13 for validium cross-subsector
+    members) creates a 2nd projects↔subsectors relationship, so PostgREST
+    returns 300 PGRST201 ('more than one relationship') without the FK hint.
+    Discovered via runtime curl during the M8.13+ perf-fix rollout."""
     _require_supabase()
     _set_cache_headers(response)
     try:
@@ -372,7 +378,7 @@ async def get_project(slug: str, response: Response) -> Dict[str, Any]:
                 "select": (
                     "*,"
                     "sector:sectors(slug,name,common_field_schema),"
-                    "subsector:subsectors(slug,name,specific_field_schema)"
+                    "subsector:subsectors!projects_subsector_slug_fkey(slug,name,specific_field_schema)"
                 ),
             },
         )
