@@ -18,6 +18,148 @@ router = APIRouter(prefix="/api/market-map", tags=["market-map"])
 
 
 # ---------------------------------------------------------------------------
+# Sector 2 (Rollup & Scaling Frameworks) read-time projection.
+#
+# The Rollup sector stores enrichment in 1:1 sidecar tables exposed via the
+# `*_full_view` Postgres views. The frontend project page only renders the
+# `sector_attributes` / `subsector_attributes` JSONB on `public.projects`,
+# so without this projection the page shows only ~6-9 fields per Rollup
+# project versus ~20+ for Core Protocol. See plan
+# `surface-rollup-sidecar-data` for context.
+# ---------------------------------------------------------------------------
+
+SECTOR2_SLUG = "rollup-scaling-frameworks"
+
+SECTOR2_VIEWS: Dict[str, str] = {
+    "optimistic-rollups": "optimistic_rollup_full_view",
+    "zk-rollups": "zk_rollup_full_view",
+    "l3-appchain-frameworks": "l3_framework_full_view",
+    "validiums-volitions-hybrid": "validium_full_view",
+}
+
+# View columns that duplicate data already on `public.projects` or
+# `public.organizations` and should not be re-merged into the JSONB blobs.
+SECTOR2_VIEW_STRIP: set[str] = {
+    "project_id",
+    "slug",
+    "display_name",
+    "description",
+    "website_url",
+    "logo_url",
+    "twitter_handle",
+    "github_url",
+    "status",
+    "sector_slug",
+    "subsector_slug",
+    "is_aggregate",
+    "not_applicable_reason",
+    "created_at",
+    "updated_at",
+    # Org columns (already returned via projects + organizations joins).
+    "org_slug",
+    "org_display_name",
+    "org_legal_name",
+    "org_entity_type",
+    "org_website_url",
+    "org_twitter_handle",
+    "org_hq_country",
+    "org_founded_year",
+    "org_total_funding_usd",
+    "org_last_funding_round",
+    "org_last_funding_date",
+}
+
+# Sector-2-wide columns (live on `public.projects` itself). When surfaced via
+# the view they belong in `sector_attributes` so the frontend groups them
+# under the sector heading rather than the subsector heading.
+SECTOR2_VIEW_TO_SECTOR_ATTRS: set[str] = {
+    "entity_role",
+    "framework_subtype",
+    "instance_subtype",
+    "lifecycle_status",
+    "lifecycle_status_changed_at",
+    "settlement_layer",
+    "data_availability_layer",
+    "withdrawal_latency_minutes",
+    "forked_from_slug",
+    "forked_from_display_name",
+    "forked_from_role",
+}
+
+
+def _is_empty(value: Any) -> bool:
+    """Treat null and trivially empty values as absent so the page doesn't
+    render a wall of em-dashes for sidecar columns that weren't curated."""
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip() == "":
+        return True
+    if isinstance(value, (list, dict)) and len(value) == 0:
+        return True
+    return False
+
+
+async def _merge_sector2_view(project: Dict[str, Any]) -> None:
+    """For Rollup-sector projects, fetch the matching `*_full_view` row and
+    merge sidecar columns into `sector_attributes` / `subsector_attributes`.
+
+    Existing JSONB keys win — the JSONB import is authoritative; the sidecar
+    is a richer overlay that only fills gaps. Mutates `project` in place."""
+    if project.get("sector_slug") != SECTOR2_SLUG:
+        return
+
+    subsector_slug = project.get("subsector_slug")
+    view_name = SECTOR2_VIEWS.get(subsector_slug or "")
+    if not view_name:
+        logger.warning(
+            "rollup project %s has unmapped subsector_slug=%s; no view merge",
+            project.get("slug"),
+            subsector_slug,
+        )
+        return
+
+    project_id = project.get("id")
+    if not project_id:
+        return
+
+    try:
+        view_row = await get_single(
+            f"/rest/v1/{view_name}",
+            params={"project_id": f"eq.{project_id}", "select": "*"},
+        )
+    except SupabaseError as exc:
+        logger.warning(
+            "rollup view fetch failed for %s (view=%s): %s",
+            project.get("slug"),
+            view_name,
+            exc,
+        )
+        return
+
+    if view_row is None:
+        logger.warning(
+            "rollup project %s has no row in %s",
+            project.get("slug"),
+            view_name,
+        )
+        return
+
+    sector_attrs: Dict[str, Any] = dict(project.get("sector_attributes") or {})
+    subsector_attrs: Dict[str, Any] = dict(project.get("subsector_attributes") or {})
+
+    for key, value in view_row.items():
+        if key in SECTOR2_VIEW_STRIP:
+            continue
+        if _is_empty(value):
+            continue
+        target = sector_attrs if key in SECTOR2_VIEW_TO_SECTOR_ATTRS else subsector_attrs
+        target.setdefault(key, value)
+
+    project["sector_attributes"] = sector_attrs
+    project["subsector_attributes"] = subsector_attrs
+
+
+# ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 
@@ -201,5 +343,7 @@ async def get_project(slug: str) -> Dict[str, Any]:
     except SupabaseError as exc:
         logger.error("project get failed: %s body=%s", exc, exc.body)
         raise _map_supabase_error(exc) from exc
+
+    await _merge_sector2_view(project)
 
     return {**project, "sector": sector, "subsector": subsector}

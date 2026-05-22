@@ -21,6 +21,19 @@ const PROSE_FIELDS = new Set([
   "practitioner_note",
   "practitioner_validation_check",
   "reason_for_inclusion",
+  // Rollup & Scaling Frameworks long-form sidecar fields (surfaced via the
+  // backend's `_merge_sector2_view` projection).
+  "inclusion_rationale",
+  "security_model_summary",
+  "execution_model_summary",
+  "settlement_summary",
+  "governance_summary",
+  "ownership_summary",
+  "roadmap_summary",
+  "operational_risk_summary",
+  "framework_architecture_summary",
+  "deployment_model_summary",
+  "interoperability_summary",
 ]);
 
 function splitList(value: string): string[] {
