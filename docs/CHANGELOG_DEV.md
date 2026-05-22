@@ -14,6 +14,62 @@
 > **Follow-ups.** <if any — empty if none>
 > ```
 
+## 2026-05-22 17:55 — Sector 4 (DeFi Systems Architecture) ingest: 68 entities across 6 subsectors via Strategy A (M8.14)
+
+**Why.** Add the fourth Market Map sector covering the core onchain credit, liquidity, yield, staking, restaking, and derivatives primitives. The Perplexity v10 handoff provided cleaned XLSX data (16 tabs, 68 entities) and per-subsector field reference docs. After the M8.10–M8.13 sidecar fatigue, we picked **Strategy A (Monetary-style, JSONB-only)** for this sector: per-protocol enum/snapshot/note fields land in `projects.sector_attributes` + `projects.subsector_attributes` only — no sidecar tables, no `*_full_view`, no backend `_merge_sector*_view` extension, no PostgREST embed surface changes. DeFi fields are primarily **display + practitioner reference**, not filter/index keys, so the sidecar pattern's cost wasn't warranted. This also preemptively avoids the "data written but invisible" class of bug from M8.x and the PostgREST embed ambiguity class from the 1396cff fix — by construction, there is nothing to project, disambiguate, or merge.
+
+**What changed.**
+
+Schemas + column maps (Strategy A locked):
+- `.cursor/skills/market-map/schemas/sectors/defi-systems-architecture.json` (new) — sector-common schema shared by every DeFi entity: `protocol_status_enum`, `protocol_status_text`, `parent_organization`, `launch_year`, `practitioner_note`, `practitioner_validation_check`, `governance_model_enum`/_text, `systemic_importance_enum`/_text, `historical_stress_text`, `version_label`, `validation_confidence`, `smart_quote_normalized`, etc. `additionalProperties: true` so enrichment passes can add keys without re-migrating.
+- 6 subsector schemas under `.cursor/skills/market-map/schemas/subsectors/` (overwrite existing empty stubs): `lending-markets.json`, `dexs-liquidity-protocols.json`, `yield-structured-markets.json`, `liquid-staking-tokens.json`, `restaking-systems.json`, `synthetic-derivatives.json`. Each defines 18–30 typed keys including dual-split `_text`/`_enum`(`_enum[]`) pairs, snapshot fields with `_as_of_date` companions, and risk fields. Snapshot values use `oneOf: [{type:'null'}, {type:'number'}]` and are null at v1 import — recurring enrichment jobs populate them later.
+- 6 column maps `.cursor/skills/market-map/schemas/subsectors/<slug>.column_map.json` (new) mapping raw XLSX headers → schema keys with type hints (`"type": "url"`, `"type": "string_list"`). Smart-quote `Practitioner's Note` → `practitioner_note` normalization shared across all six.
+
+Skill docs:
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/SKILL.md` (rewrite) — Strategy A decision + rationale; sector-common field table; cross-subsector duplicate-row pattern (1 projects row per product, shared `maintaining_organization` org slug); snapshot `_as_of_date` convention; deferred work list.
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/subsectors/*.md` × 6 (rewrite) — inclusion rules, field tables, versioned/cross-subsector entities, v2 deferrals.
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/_source/DeFi-Systems-Architecture_cleaned_v1.xlsx` (copy from `~/Downloads/canhav-skills-v10`) for stable script path.
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/{data_gaps.md, _source/PERPLEXITY-handoff-v10-excerpt.md}` (copy) for provenance.
+
+Migration (no new tables, no views, no RLS, no indexes):
+- `supabase/migrations/20260524_0001_defi_systems_architecture_schemas.sql` (new) — `UPDATE public.sectors SET common_field_schema = ...` for `defi-systems-architecture`; six `UPDATE public.subsectors SET specific_field_schema = ...` (one per subsector); `INSERT … ON CONFLICT DO NOTHING` to pre-seed 5 cross-subsector organizations (`ether-fi`, `synthetix`, `notional-finance`, `dydx`, `swell`). Applied via Supabase MCP.
+
+Ingest script (Strategy A, no sidecar writes):
+- `.cursor/skills/market-map/scripts/ingest_defi_xlsx.py` (new, modeled on `ingest_monetary_xlsx.py`) — reads the cleaned XLSX, normalizes smart quotes, strips parenthetical source citations from URLs (`(Spark Docs)`, `(Maple Finance)` etc.), extracts version labels into `sector_attributes.version_label`, parses launch year ints, derives `protocol_status_enum`/`governance_model_enum`/`systemic_importance_enum` from the free-text columns, derives `restaking_role_enum` and `derivative_archetype_enum` from contextual cues, validates each row against universal + sector + subsector schemas, resolves `maintaining_organization` to an org slug (creating missing org rows with best-effort `entity_type`), and upserts via the existing `app.services.supabase` invariant (shared httpx client). `--dry-run`, `--slug <subsector>` flags.
+- Cross-subsector slug collision handling: dYdX (v3 on Ethereum) appears in both DEXs and Derivatives tabs with the same canonical slug. Per Strategy A's per-(slug, subsector) row model, the DEXs occurrence is remapped to `dydx-v3-on-ethereum-dex` via a hardcoded `SUBSECTOR_SLUG_OVERRIDES` table. All other cross-subsector brands (Ether.fi, Synthetix, Swell, Notional) already have distinct per-product slugs in the source sheet.
+
+Frontend (one file, additive):
+- `frontend/app/market-map/project/[slug]/page.tsx` — extended the existing `PROSE_FIELDS` set with ~55 DeFi long-form keys (`description`, `systemic_risk_exposure_text`, `oracle_dependencies_text`, `upstream_dependencies_text`, `slashing_conditions`, `liquidation_mechanism_text`, `risk_transformation_text`, etc.) so author line breaks survive on the project detail page. No `force-dynamic` flip, no `revalidate` change, no embed touched.
+
+**Files.**
+- `supabase/migrations/20260524_0001_defi_systems_architecture_schemas.sql` (new)
+- `.cursor/skills/market-map/schemas/sectors/defi-systems-architecture.json` (new)
+- `.cursor/skills/market-map/schemas/subsectors/{lending-markets,dexs-liquidity-protocols,yield-structured-markets,liquid-staking-tokens,restaking-systems,synthetic-derivatives}.json` (new × 6)
+- `.cursor/skills/market-map/schemas/subsectors/{...}.column_map.json` (new × 6)
+- `.cursor/skills/market-map/scripts/ingest_defi_xlsx.py` (new)
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/SKILL.md` (rewrite)
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/subsectors/*.md` (rewrite × 6)
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/_source/{DeFi-Systems-Architecture_cleaned_v1.xlsx,PERPLEXITY-handoff-v10-excerpt.md}` (copy)
+- `.cursor/skills/market-map/sectors/defi-systems-architecture/data_gaps.md` (copy)
+- `frontend/app/market-map/project/[slug]/page.tsx` (PROSE_FIELDS additions only)
+- `docs/CHANGELOG_DEV.md` (this entry)
+
+**Verified.**
+- All 6 subsectors validated cleanly in dry-run against universal + sector + subsector JSON schemas (no validation errors across 68 rows).
+- Supabase upserts: 17 (lending-markets) + 11 (dexs-liquidity-protocols) + 13 (yield-structured-markets) + 8 (liquid-staking-tokens) + 8 (restaking-systems) + 11 (synthetic-derivatives) = **68 total** projects rows for `sector_slug='defi-systems-architecture'`. Confirmed via Supabase MCP `select count(*)`.
+- Preflight key-density SQL: `avg_sector_keys` 16–17 across all six subsectors; `avg_subsector_keys` 11–17 (lower than the 18 plan target because the source XLSX simply has fewer populated columns per row in some subsectors — schemas are generous and `additionalProperties: true` so enrichment can add more later without migrating).
+- `tsc --noEmit` passes on frontend after PROSE_FIELDS additions.
+- Performance + correctness contract invariants preserved by construction: shared httpx client untouched (no new request handlers); no new routes; no new embeds (no new junction tables); existing `revalidate = 60` on project page applies; sidecar pattern not used; no new indexes.
+
+**Follow-ups.**
+- Org hygiene: a handful of `maintaining_organization` cells in the source sheet contain long narrative descriptions (e.g. "Originated via C.R.E.A.M. Finance × Yearn collaboration; operational control described as …") which the ingest faithfully slugified into long, ugly `organizations.slug` rows. Plan to add a small `MAINTAINING_ORG_BRAND_MAP` in the ingest script and re-canonicalize those rows in a follow-up PR (purely cosmetic; doesn't affect FK integrity).
+- Snapshot enrichment: `tvl_usd_snapshot`, `borrows_usd_snapshot`, `volume_24h_usd_snapshot`, `staked_eth_snapshot`, `restaked_tvl_usd_snapshot`, `open_interest_usd_snapshot`, `apy_*_snapshot` etc. are all null at v1. Separate `enrich_defi_snapshots.py` PR + daily cron will pull from DefiLlama / Token Terminal / subgraphs.
+- Child tables explicitly deferred: `lending_markets_market`, `dex_pool`, `yield_strategy`, `lst_operator`, `avs_roster`, `derivatives_market`, `protocol_stress_events`, `protocol_composition` → ship as separate `/api/market-map/projects/<slug>/<child>` endpoints in follow-up PRs, never as PostgREST embeds on `get_project`.
+- LLM extraction of `key_diligence_points[]` from `practitioner_note` → separate enrichment PR.
+- Logos for the 68 entities → run `bulk_upload_logos.py` after data lands.
+- Frontend multi-subsector chip rendering for true cross-subsector entities → not needed under the duplicate-rows decision.
+- Render smoke test (8 known slugs return 200 on `canhav-backend.onrender.com`) deferred to post-push verification.
+
 ## 2026-05-22 14:00 — Sector 2 complete: ZK Rollups + L3 & Appchain + Validiums (M8.11–M8.13) + OP Stack/Nitro practitioner-swap closure
 
 **Why.** With M8.10 (Optimistic Rollups + sector-2 SSoT schema) shipped on 2026-05-21, the remaining three subsectors of Sector 2 follow the same pattern: cleaned XLSX is canonical v1, sidecar table per subsector for 30+ specialty fields, JSONB schema kept lean as audit-metadata hints. The differentiator across M8.11–M8.13 is the **cross-subsector membership pattern**: 6 real-world entities (`op-stack`, `arbitrum-nitro`, `zk-stack`, `starkex`, `polygon-cdk`, `zksync-era`) each appear in 2-3 subsectors as the same entity through different practitioner lenses. M8.11 introduces `public.subsector_memberships` to enforce SSoT-with-multi-subsector (one project row per real-world thing, N membership rows for N subsectors it participates in). M8.12 and M8.13 then layer 5 new framework rows and 2 new instance rows on top without duplicating any engines.
