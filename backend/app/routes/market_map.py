@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
@@ -19,28 +20,42 @@ router = APIRouter(prefix="/api/market-map", tags=["market-map"])
 
 
 # ---------------------------------------------------------------------------
-# Sector 2 (Rollup & Scaling Frameworks) read-time projection.
+# Subsector view registry (sector-agnostic).
 #
-# The Rollup sector stores enrichment in 1:1 sidecar tables exposed via the
-# `*_full_view` Postgres views. The frontend project page only renders the
+# Some subsectors store enrichment in 1:1 sidecar tables exposed via Postgres
+# `*_full_view` views. The frontend project page only renders the
 # `sector_attributes` / `subsector_attributes` JSONB on `public.projects`,
-# so without this projection the page shows only ~6-9 fields per Rollup
-# project versus ~20+ for Core Protocol. See plan
-# `surface-rollup-sidecar-data` for context.
+# so without this projection the page shows only ~6-9 fields per project
+# versus 20+ for sectors that write straight into JSONB. The registry below
+# is keyed by `subsector_slug`: any subsector that ships a sidecar view just
+# adds one entry here and the merge happens automatically.
+#
+# History: originally hard-coded to Sector 2 (Rollup & Scaling Frameworks)
+# as `SECTOR2_VIEWS` / `SECTOR2_VIEW_STRIP` / `SECTOR2_VIEW_TO_SECTOR_ATTRS`.
+# Generalized in M8.16 ahead of Sector 5 (Data & Consensus Infrastructure)
+# because that sector ships 5 sidecars and a per-sector patch would have been
+# the same antipattern. See plan `sector_5_data_consensus_ingest`.
 # ---------------------------------------------------------------------------
 
-SECTOR2_SLUG = "rollup-scaling-frameworks"
 
-SECTOR2_VIEWS: Dict[str, str] = {
-    "optimistic-rollups": "optimistic_rollup_full_view",
-    "zk-rollups": "zk_rollup_full_view",
-    "l3-appchain-frameworks": "l3_framework_full_view",
-    "validiums-volitions-hybrid": "validium_full_view",
-}
+@dataclass(frozen=True)
+class SubsectorViewSpec:
+    """Wiring for one subsector's `*_full_view` -> JSONB projection.
 
-# View columns that duplicate data already on `public.projects` or
-# `public.organizations` and should not be re-merged into the JSONB blobs.
-SECTOR2_VIEW_STRIP: set[str] = {
+    `view_name` is the Postgres view to fetch by `project_id`. `sector_attr_keys`
+    are columns that should land in `sector_attributes` (sector-wide typed cols
+    on `public.projects`) rather than `subsector_attributes`. Everything else
+    in the view (after stripping common universal + schema-passthrough columns)
+    lands in `subsector_attributes`.
+    """
+
+    view_name: str
+    sector_attr_keys: frozenset[str] = field(default_factory=frozenset)
+
+
+# Columns that live on `public.projects` or `public.organizations` already and
+# should never be merged back into JSONB. Common to every subsector view.
+_VIEW_STRIP_COMMON: set[str] = {
     "project_id",
     "slug",
     "display_name",
@@ -70,10 +85,21 @@ SECTOR2_VIEW_STRIP: set[str] = {
     "org_last_funding_date",
 }
 
-# Sector-2-wide columns (live on `public.projects` itself). When surfaced via
-# the view they belong in `sector_attributes` so the frontend groups them
-# under the sector heading rather than the subsector heading.
-SECTOR2_VIEW_TO_SECTOR_ATTRS: set[str] = {
+# Schema metadata appended to every `*_full_view` by migration 20260523_0001
+# (and analogous later migrations). Stripped from the JSONB merge; could be
+# projected into the `sector`/`subsector` nested objects in a future refactor.
+_VIEW_SCHEMA_PASSTHROUGH: set[str] = {
+    "sector_name",
+    "subsector_name",
+    "sector_common_field_schema",
+    "subsector_specific_field_schema",
+}
+
+# Sector 2 (Rollup & Scaling Frameworks) sector-wide typed columns. These
+# live on `public.projects` itself but are surfaced via the rollup views; we
+# route them into `sector_attributes` so the frontend groups them under the
+# sector heading rather than the subsector heading.
+_SECTOR2_ATTR_KEYS: frozenset[str] = frozenset({
     "entity_role",
     "framework_subtype",
     "instance_subtype",
@@ -85,6 +111,56 @@ SECTOR2_VIEW_TO_SECTOR_ATTRS: set[str] = {
     "forked_from_slug",
     "forked_from_display_name",
     "forked_from_role",
+})
+
+# Sector 5 (Data & Consensus Infrastructure) sector-wide typed columns. Added
+# to `public.projects` in migration 20260523_0002.
+_SECTOR5_ATTR_KEYS: frozenset[str] = frozenset({
+    "data_infra_archetype",
+    "trust_model",
+    "centralization_risk_score",
+    "centralization_risk_evidence_quality",
+})
+
+SUBSECTOR_VIEW_REGISTRY: Dict[str, SubsectorViewSpec] = {
+    # Sector 2 — Rollup & Scaling Frameworks
+    "optimistic-rollups": SubsectorViewSpec(
+        view_name="optimistic_rollup_full_view",
+        sector_attr_keys=_SECTOR2_ATTR_KEYS,
+    ),
+    "zk-rollups": SubsectorViewSpec(
+        view_name="zk_rollup_full_view",
+        sector_attr_keys=_SECTOR2_ATTR_KEYS,
+    ),
+    "l3-appchain-frameworks": SubsectorViewSpec(
+        view_name="l3_framework_full_view",
+        sector_attr_keys=_SECTOR2_ATTR_KEYS,
+    ),
+    "validiums-volitions-hybrid": SubsectorViewSpec(
+        view_name="validium_full_view",
+        sector_attr_keys=_SECTOR2_ATTR_KEYS,
+    ),
+    # Sector 5 — Data & Consensus Infrastructure (added in M8.16).
+    "rpc-node-providers": SubsectorViewSpec(
+        view_name="rpc_endpoints_full_view",
+        sector_attr_keys=_SECTOR5_ATTR_KEYS,
+    ),
+    "oracles-data-networks": SubsectorViewSpec(
+        view_name="oracle_feeds_full_view",
+        sector_attr_keys=_SECTOR5_ATTR_KEYS,
+    ),
+    "data-availability-systems": SubsectorViewSpec(
+        view_name="da_commitments_full_view",
+        sector_attr_keys=_SECTOR5_ATTR_KEYS,
+    ),
+    "indexing-query-engines": SubsectorViewSpec(
+        view_name="indexer_datasets_full_view",
+        sector_attr_keys=_SECTOR5_ATTR_KEYS,
+    ),
+    "analytics-intelligence": SubsectorViewSpec(
+        view_name="analytics_dashboards_full_view",
+        sector_attr_keys=_SECTOR5_ATTR_KEYS,
+    ),
 }
 
 
@@ -100,34 +176,15 @@ def _is_empty(value: Any) -> bool:
     return False
 
 
-# Columns added to the rollup `*_full_view`s by migration 20260523_0001 that
-# carry sector/subsector schema metadata, not sidecar attributes. We strip them
-# from the JSONB merge and (where applicable) project them up into the
-# `sector` / `subsector` nested objects on the response.
-_VIEW_SCHEMA_PASSTHROUGH = {
-    "sector_name",
-    "subsector_name",
-    "sector_common_field_schema",
-    "subsector_specific_field_schema",
-}
-
-
-async def _fetch_sector2_view_row(project: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Look up the matching `*_full_view` row for a rollup project. Returns
-    None when the project is not in Sector 2 or no view is mapped. Logs and
-    returns None on Supabase errors — the project page should still render
-    with the universal projects.* columns even if the view fetch fails."""
-    if project.get("sector_slug") != SECTOR2_SLUG:
-        return None
-
-    subsector_slug = project.get("subsector_slug")
-    view_name = SECTOR2_VIEWS.get(subsector_slug or "")
-    if not view_name:
-        logger.warning(
-            "rollup project %s has unmapped subsector_slug=%s; no view merge",
-            project.get("slug"),
-            subsector_slug,
-        )
+async def _fetch_subsector_view_row(project: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Look up the matching `*_full_view` row for a project whose subsector
+    is registered in `SUBSECTOR_VIEW_REGISTRY`. Returns None when no view is
+    mapped. Logs and returns None on Supabase errors — the project page should
+    still render with the universal projects.* columns even if the view fetch
+    fails."""
+    subsector_slug = project.get("subsector_slug") or ""
+    spec = SUBSECTOR_VIEW_REGISTRY.get(subsector_slug)
+    if spec is None:
         return None
 
     project_id = project.get("id")
@@ -136,33 +193,37 @@ async def _fetch_sector2_view_row(project: Dict[str, Any]) -> Optional[Dict[str,
 
     try:
         return await get_single(
-            f"/rest/v1/{view_name}",
+            f"/rest/v1/{spec.view_name}",
             params={"project_id": f"eq.{project_id}", "select": "*"},
         )
     except SupabaseError as exc:
         logger.warning(
-            "rollup view fetch failed for %s (view=%s): %s",
+            "subsector view fetch failed for %s (view=%s): %s",
             project.get("slug"),
-            view_name,
+            spec.view_name,
             exc,
         )
         return None
 
 
-def _merge_sector2_view_row(project: Dict[str, Any], view_row: Dict[str, Any]) -> None:
+def _merge_subsector_view_row(project: Dict[str, Any], view_row: Dict[str, Any]) -> None:
     """Merge sidecar columns from a `*_full_view` row into the project's
     `sector_attributes` / `subsector_attributes` JSONB. Existing JSONB keys
     win — the JSONB import is authoritative; the sidecar is an overlay that
     only fills gaps. Mutates `project` in place."""
+    subsector_slug = project.get("subsector_slug") or ""
+    spec = SUBSECTOR_VIEW_REGISTRY.get(subsector_slug)
+    sector_attr_keys: frozenset[str] = spec.sector_attr_keys if spec else frozenset()
+
     sector_attrs: Dict[str, Any] = dict(project.get("sector_attributes") or {})
     subsector_attrs: Dict[str, Any] = dict(project.get("subsector_attributes") or {})
 
     for key, value in view_row.items():
-        if key in SECTOR2_VIEW_STRIP or key in _VIEW_SCHEMA_PASSTHROUGH:
+        if key in _VIEW_STRIP_COMMON or key in _VIEW_SCHEMA_PASSTHROUGH:
             continue
         if _is_empty(value):
             continue
-        target = sector_attrs if key in SECTOR2_VIEW_TO_SECTOR_ATTRS else subsector_attrs
+        target = sector_attrs if key in sector_attr_keys else subsector_attrs
         target.setdefault(key, value)
 
     project["sector_attributes"] = sector_attrs
@@ -350,15 +411,16 @@ async def list_projects(
 @router.get("/projects/{slug}")
 async def get_project(slug: str, response: Response) -> Dict[str, Any]:
     """Fetch a project with its sector/subsector schemas embedded in one PostgREST
-    round-trip via resource embedding. For Sector-2 (Rollup) projects the matching
-    `*_full_view` row is fetched in parallel and its sidecar columns are merged
-    into the JSONB blobs. Net: at most one round-trip of latency regardless of
-    which sector the project lives in.
+    round-trip via resource embedding. For any subsector registered in
+    `SUBSECTOR_VIEW_REGISTRY` the matching `*_full_view` row is fetched and its
+    sidecar columns are merged into the JSONB blobs. Net: at most one extra
+    round-trip of latency regardless of which sector the project lives in.
 
-    The rollup views were extended in migration 20260523_0001 with
-    sector_common_field_schema / subsector_specific_field_schema columns; a future
-    refactor could drop the embedded sector/subsector select and serve the rollup
-    path from the view alone, but the views don't yet include every universal
+    The `*_full_view`s were extended in migration 20260523_0001 (and later
+    sector migrations) with sector_common_field_schema /
+    subsector_specific_field_schema columns; a future refactor could drop the
+    embedded sector/subsector select and serve registered subsectors from the
+    view alone, but the views don't yet include every universal
     `public.projects` column the frontend reads (stage, hq_country, team_size_range,
     total_funding_usd, sector_attributes JSONB, etc.), so we keep both paths
     converging through the projects table for now.
@@ -389,8 +451,8 @@ async def get_project(slug: str, response: Response) -> Dict[str, Any]:
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project not found: {slug}")
 
-    view_row = await _fetch_sector2_view_row(project)
+    view_row = await _fetch_subsector_view_row(project)
     if view_row is not None:
-        _merge_sector2_view_row(project, view_row)
+        _merge_subsector_view_row(project, view_row)
 
     return project
