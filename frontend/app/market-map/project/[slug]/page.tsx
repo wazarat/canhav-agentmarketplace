@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink, ShieldCheck } from "lucide-react";
+import { EyeOff, ExternalLink, ShieldCheck } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/market-map/Breadcrumbs";
 import { getProject, MarketMapError, type ProjectDetail } from "@/lib/market-map";
@@ -13,6 +13,20 @@ const LIST_FIELDS = new Set([
   "role_in_consensus",
   "reason_for_inclusion",
   "practitioner_validation_check",
+  // Sector 6 (Advanced Compute & Integration) list-shaped raw fields. The
+  // importer dual-writes the canonical m2m rows into project_chains /
+  // project_composes_with / project_token_standards / project_custodians /
+  // project_identifier_standards / project_credential_standards, but the
+  // raw semicolon-separated source string is preserved in subsector_attributes
+  // so the project page still renders list bullets without an extra fetch.
+  "chains_supported_raw",
+  "supported_chains_raw",
+  "composable_with_raw",
+  "token_standard_raw",
+  "identifier_standard_raw",
+  "credential_standard_raw",
+  "jurisdictions_raw",
+  "custodians_raw",
 ]);
 
 // Fields whose values are long-form prose paragraphs. We render them with
@@ -187,7 +201,146 @@ const PROSE_FIELDS = new Set([
   "narrative_influence_level",
   "decision_dependency_criticality",
   "epistemic_risk_level",
+  // Sector 6 (Advanced Compute & Integration) long-form prose fields. Most
+  // come from the source sheet's "Practitioner's Note" / "Description Long"
+  // columns and span multiple sentences; rendering them with whitespace-pre-line
+  // preserves the author's line breaks.
+  "one_line_description",
+  "description_long",
+  "primary_use_case",
+  "primary_use_cases",
+  "primary_users",
+  "primary_customers",
+  "primary_participants_primary",
+  "primary_participants_secondary",
+  "primary_agent_function",
+  "target_users",
+  "inference_planning_method",
+  "human_override_capability",
+  "replayability",
+  "failure_handling",
+  "agent_identity_model",
+  "permissioning_model",
+  "permissioning_model_primary",
+  "permissioning_model_secondary",
+  "sybil_resistance",
+  "fee_incentive_model",
+  "fee_model",
+  "value_accrual_primary",
+  "value_accrual_secondary",
+  "external_dependencies_primary",
+  "external_dependencies_secondary",
+  "primary_risk_factor_1",
+  "primary_risk_factor_2",
+  "censorship_resistance",
+  "censorship_freeze_risk",
+  "censorship_geographic_risk",
+  "upgrade_governance_control",
+  "upgrade_control",
+  "defensibility_source",
+  "sector_adjacency_risk",
+  "scope_annotation",
+  // RWA-specific narrative fields.
+  "asset_issuer",
+  "legal_structure",
+  "jurisdiction_legal_enforceability",
+  "redemption_rights",
+  "investor_rights",
+  "kyc_aml_enforcement",
+  "transfer_restrictions",
+  "bidirectional_sync",
+  "final_source_of_truth",
+  "cash_flow_handling",
+  "dispute_resolution",
+  "key_trusted_parties",
+  "composable_with_defi",
+  "scalability_constraints",
+  // Identity-specific narrative fields.
+  "reputation_attestation_type",
+  "social_graph_model",
+  "who_can_issue_credentials",
+  "revocation_mechanism",
+  "role_permission_enforcement",
+  "centralized_dependency_value",
+  "centralized_dependency_detail",
+  "on_chain_verifiability_value",
+  "on_chain_verifiability_detail",
+  "smart_contract_composability_value",
+  "smart_contract_composability_detail",
+  "cross_protocol_reusability",
+  // DePIN-specific narrative fields.
+  "hardware_ownership_model",
+  "coordinator_topology",
+  "governance_control_dimension",
+  "slashing_or_penalty_mechanism_detail",
+  "slashing_detail",
+  "minimum_physical_requirements",
+  "on_chain_settlement_scope",
+  "reward_distribution",
+  "anti_cheating",
+  "trusted_components",
+  "token_incentive_model",
+  "cost_structure_operators",
+  "geographic_distribution_detail",
+  "governance_model",
+  // Cross-Chain Compute-specific narrative fields.
+  "execution_location_primary",
+  "execution_location_secondary",
+  "execution_type_primary",
+  "execution_type_secondary",
+  "verification_mechanism_primary",
+  "verification_mechanism_secondary",
+  "verification_strength_tier",
+  "who_verifies_execution_primary",
+  "who_verifies_execution_secondary",
+  "dispute_resolution_model",
+  "finality_anchor",
+  "trust_assumptions",
+  "incentive_alignment",
 ]);
+
+// RWA disclosure fields per ISS-S6-011 (Cursor + User decision: visible with
+// "Not disclosed" badge rather than hidden). When the project's subsector is
+// `real-world-assets-rwas` and one of these keys is absent or null, the
+// project page renders a NotDisclosed badge instead of an em-dash so readers
+// can see at a glance that a regulatory primitive is missing from the source
+// data rather than from the model. Keys are intentionally the same shape as
+// the rwa_details columns so the importer's dual-write path Just Works.
+const RWA_DISCLOSURE_FIELDS = [
+  "jurisdictions_raw",
+  "asset_issuer",
+  "asset_issuer_as_of_date",
+  "legal_structure",
+  "jurisdiction_legal_enforceability",
+  "permissioning_model_primary",
+  "custodians_raw",
+  "custodians_as_of_date",
+  "redemption_rights",
+  "investor_rights",
+  "kyc_aml_enforcement",
+  "transfer_restrictions",
+] as const;
+
+const RWA_DISCLOSURE_FIELD_SET: ReadonlySet<string> = new Set(RWA_DISCLOSURE_FIELDS);
+
+function isAbsentValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string" && value.trim() === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return false;
+}
+
+function NotDisclosedBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-ink-700/60 bg-ink-900/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-ink-300"
+      title="Source disclosed no value for this field. Treat absence as 'not disclosed', not 'not applicable'."
+    >
+      <EyeOff className="h-3 w-3" />
+      Not disclosed
+    </span>
+  );
+}
 
 function splitList(value: string): string[] {
   return value
@@ -351,6 +504,19 @@ export default async function ProjectPage({ params }: PageProps) {
 
   const sectorAttrs = Object.entries(project.sector_attributes ?? {});
   const subsectorAttrs = Object.entries(project.subsector_attributes ?? {});
+
+  // RWA disclosure UX (ISS-S6-011): inject any RWA disclosure key that's
+  // missing from JSONB so the project page can render a "Not disclosed" badge
+  // for it, instead of silently dropping the row. Only applied when the
+  // project's primary subsector is `real-world-assets-rwas`.
+  const isRwaSubsector = project.subsector_slug === "real-world-assets-rwas";
+  if (isRwaSubsector) {
+    const existingKeys = new Set(subsectorAttrs.map(([k]) => k));
+    for (const k of RWA_DISCLOSURE_FIELDS) {
+      if (!existingKeys.has(k)) subsectorAttrs.push([k, null]);
+    }
+  }
+
   const canonical = isCanonicalProject(project);
 
   return (
@@ -476,18 +642,28 @@ export default async function ProjectPage({ params }: PageProps) {
         {subsectorAttrs.length > 0 && (
           <Section
             title={`${project.subsector?.name ?? "Subsector"} attributes`}
-            subtitle="Fields specific to this subsector."
+            subtitle={
+              isRwaSubsector
+                ? "Fields specific to this subsector. Regulatory and custodial fields render a 'Not disclosed' badge when the source disclosed no value (ISS-S6-011)."
+                : "Fields specific to this subsector."
+            }
             accent={canonical ? "amber" : "default"}
           >
             <dl>
-              {subsectorAttrs.map(([key, value]) => (
-                <FieldRow
-                  key={key}
-                  label={humanLabel(key, project.subsector?.specific_field_schema)}
-                  value={formatValue(value, key)}
-                  alignTop={fieldNeedsTopAlign(key, value)}
-                />
-              ))}
+              {subsectorAttrs.map(([key, value]) => {
+                const renderAsBadge =
+                  isRwaSubsector &&
+                  RWA_DISCLOSURE_FIELD_SET.has(key) &&
+                  isAbsentValue(value);
+                return (
+                  <FieldRow
+                    key={key}
+                    label={humanLabel(key, project.subsector?.specific_field_schema)}
+                    value={renderAsBadge ? <NotDisclosedBadge /> : formatValue(value, key)}
+                    alignTop={fieldNeedsTopAlign(key, value)}
+                  />
+                );
+              })}
             </dl>
           </Section>
         )}

@@ -122,6 +122,32 @@ _SECTOR5_ATTR_KEYS: frozenset[str] = frozenset({
     "centralization_risk_evidence_quality",
 })
 
+# Sector 6 (Advanced Compute & Integration) sector-wide typed columns. Added
+# to `public.projects` in migration 20260525_0001. These 16 keys are the
+# promotions documented in the sector skill (`.cursor/skills/market-map/
+# sectors/advanced-compute-integration/SKILL.md`). They live on `public.projects`
+# itself and are surfaced through every Sector 6 `*_full_view`; the registry
+# routes them into `sector_attributes` so the frontend groups them under the
+# sector heading rather than the subsector heading.
+_SECTOR6_ATTR_KEYS: frozenset[str] = frozenset({
+    "subsector_slug_secondary",
+    "is_pattern",
+    "entity_type",
+    "entity_archetype",
+    "maintaining_organization_raw",
+    "year_launched_text",
+    "year_launched_int",
+    "mainnet_status",
+    "mainnet_status_as_of_date",
+    "one_line_description",
+    "practitioner_note",
+    "practitioner_validation_check",
+    "parent_project_slug",
+    "scope_annotation",
+    "description_long",
+    "reason_for_inclusion",
+})
+
 SUBSECTOR_VIEW_REGISTRY: Dict[str, SubsectorViewSpec] = {
     # Sector 2 — Rollup & Scaling Frameworks
     "optimistic-rollups": SubsectorViewSpec(
@@ -160,6 +186,35 @@ SUBSECTOR_VIEW_REGISTRY: Dict[str, SubsectorViewSpec] = {
     "analytics-intelligence": SubsectorViewSpec(
         view_name="analytics_dashboards_full_view",
         sector_attr_keys=_SECTOR5_ATTR_KEYS,
+    ),
+    # Sector 6 — Advanced Compute & Integration (added in 20260525 migrations).
+    # Every subsector ships a sidecar + `*_full_view` because each exceeds the
+    # 10-typed-column threshold from Invariant 5. The read path uses
+    # `subsectors!projects_subsector_slug_fkey` so dual-subsector projects
+    # (Worldcoin → Identity primary + DePIN secondary, Bittensor → AI Agents
+    # primary + DePIN secondary, RISC Zero / Axiom → Cross-Chain primary +
+    # AI Agents secondary) resolve to their primary sidecar; the `ai_agents`
+    # and `depin` views include rows whose secondary slug matches so cross-
+    # listings still appear in subsector listings.
+    "ai-agents-and-autonomous-systems": SubsectorViewSpec(
+        view_name="ai_agents_full_view",
+        sector_attr_keys=_SECTOR6_ATTR_KEYS,
+    ),
+    "real-world-assets-rwas": SubsectorViewSpec(
+        view_name="rwa_full_view",
+        sector_attr_keys=_SECTOR6_ATTR_KEYS,
+    ),
+    "identity-and-social-graphs": SubsectorViewSpec(
+        view_name="identity_full_view",
+        sector_attr_keys=_SECTOR6_ATTR_KEYS,
+    ),
+    "depin-physical-infrastructure": SubsectorViewSpec(
+        view_name="depin_full_view",
+        sector_attr_keys=_SECTOR6_ATTR_KEYS,
+    ),
+    "cross-chain-compute": SubsectorViewSpec(
+        view_name="cross_chain_full_view",
+        sector_attr_keys=_SECTOR6_ATTR_KEYS,
     ),
 }
 
@@ -447,6 +502,28 @@ async def get_project(slug: str, response: Response) -> Dict[str, Any]:
     except SupabaseError as exc:
         logger.error("project get failed: %s body=%s", exc, exc.body)
         raise _map_supabase_error(exc) from exc
+
+    if project is None:
+        alias_row = await get_single(
+            "/rest/v1/project_aliases",
+            params={
+                "or": f"(alias_name.eq.{slug},alias_name.ilike.{slug})",
+                "select": "project_slug",
+            },
+        )
+        canonical_slug = (alias_row or {}).get("project_slug") if alias_row else None
+        if canonical_slug:
+            project = await get_single(
+                "/rest/v1/projects",
+                params={
+                    "slug": f"eq.{canonical_slug}",
+                    "select": (
+                        "*,"
+                        "sector:sectors(slug,name,common_field_schema),"
+                        "subsector:subsectors!projects_subsector_slug_fkey(slug,name,specific_field_schema)"
+                    ),
+                },
+            )
 
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project not found: {slug}")
