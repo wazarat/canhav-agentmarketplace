@@ -18,9 +18,9 @@ export function Hero() {
           </div>
 
           <h1 className="mt-5 animate-fade-in-up font-display text-5xl font-semibold leading-[1.05] tracking-tight text-ink-50 [animation-delay:60ms] sm:text-6xl lg:text-[68px]">
-            The builder intelligence for shipping{" "}
-            <span className="text-gradient-brand">web3 products</span> with{" "}
-            <span className="text-gradient-brand">AI agents</span>.
+            Research{" "}
+            <span className="text-gradient-brand">DeFi protocols and projects</span>{" "}
+            beyond on-chain data.
           </h1>
 
           <p className="mt-6 max-w-xl animate-fade-in-up text-lg leading-relaxed text-ink-100/85 [animation-delay:140ms]">

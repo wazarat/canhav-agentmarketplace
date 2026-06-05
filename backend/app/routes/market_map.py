@@ -71,6 +71,13 @@ _VIEW_STRIP_COMMON: set[str] = {
     "not_applicable_reason",
     "created_at",
     "updated_at",
+    # Sector 7 alias: views select `p.entity_archetype as entity_archetype_universal`
+    # to avoid column-name collision with the per-subsector sidecar's
+    # `entity_archetype` (or `primary_archetype` for Custody). The universal value
+    # already lives on `projects.entity_archetype` and is rendered via the sector
+    # common schema, so the alias is stripped from the JSONB merge to avoid a
+    # duplicate "Entity archetype (universal)" facet on the project page.
+    "entity_archetype_universal",
     # Org columns (already returned via projects + organizations joins).
     "org_slug",
     "org_display_name",
@@ -148,6 +155,18 @@ _SECTOR6_ATTR_KEYS: frozenset[str] = frozenset({
     "reason_for_inclusion",
 })
 
+# Sector 7 (Governance & Enterprise Framework) sector-wide typed columns. Adds
+# `subsector_scope_of` and `deprecation_note` on top of the inherited Sector 6
+# promotions (migration 20260526_0001). The 4 subsector full_views surface
+# the same Sector-6 columns under the universal aliases (entity_type,
+# entity_archetype_universal, etc.); the SECTOR7 set lists the columns we want
+# routed into `sector_attributes` so the frontend groups them under the sector
+# heading rather than the subsector heading.
+_SECTOR7_ATTR_KEYS: frozenset[str] = _SECTOR6_ATTR_KEYS | frozenset({
+    "subsector_scope_of",
+    "deprecation_note",
+})
+
 SUBSECTOR_VIEW_REGISTRY: Dict[str, SubsectorViewSpec] = {
     # Sector 2 — Rollup & Scaling Frameworks
     "optimistic-rollups": SubsectorViewSpec(
@@ -215,6 +234,31 @@ SUBSECTOR_VIEW_REGISTRY: Dict[str, SubsectorViewSpec] = {
     "cross-chain-compute": SubsectorViewSpec(
         view_name="cross_chain_full_view",
         sector_attr_keys=_SECTOR6_ATTR_KEYS,
+    ),
+    # Sector 7 — Governance & Enterprise Framework (added in 20260526 migrations).
+    # Each subsector exceeds the 10-typed-column threshold from Invariant 5 so
+    # every one ships a sidecar + `*_full_view`. Each view surfaces inherited
+    # Sector-6 columns as universal aliases plus the Sector-7 promotions
+    # (`subsector_scope_of`, `deprecation_note`).
+    "dao-governance-systems": SubsectorViewSpec(
+        view_name="dao_governance_systems_full_view",
+        sector_attr_keys=_SECTOR7_ATTR_KEYS,
+    ),
+    "enterprise-blockchain-adoption": SubsectorViewSpec(
+        view_name="enterprise_blockchain_adoption_full_view",
+        sector_attr_keys=_SECTOR7_ATTR_KEYS,
+    ),
+    "cbdcs-and-public-sector-pilots": SubsectorViewSpec(
+        view_name="cbdcs_and_public_sector_pilots_full_view",
+        sector_attr_keys=_SECTOR7_ATTR_KEYS,
+    ),
+    "compliance-and-regulatory-intelligence": SubsectorViewSpec(
+        view_name="compliance_and_regulatory_intelligence_full_view",
+        sector_attr_keys=_SECTOR7_ATTR_KEYS,
+    ),
+    "institutional-custody-and-security": SubsectorViewSpec(
+        view_name="institutional_custody_and_security_full_view",
+        sector_attr_keys=_SECTOR7_ATTR_KEYS,
     ),
 }
 
